@@ -429,7 +429,7 @@ function renderDetail(keep){
   '<div class="sect" style="border-color:var(--green)"><div class="sec"><span>Aufmaß</span></div>'+
   '<div class="figs"><div><div class="big num">'+nf(hoursTotal(p))+'<span style="font-size:22px"> h</span></div><div class="l">Stunden gesamt</div></div><div><div class="big num">'+p.mat.length+'</div><div class="l">Materialbuchungen</div></div></div>'+
   (arch?'':'<div class="row2"><button class="btn main" data-act="hours" data-pid="'+p.id+'">'+ico.clock.replace('#101514','currentColor')+'Stunden</button><button class="btn" data-act="book" data-pid="'+p.id+'">'+ico.box.replace('#101514','currentColor')+'Material</button></div>')+
-  '<div>'+bkHtml+'</div></div>'+
+  '<div>'+bkHtml+'</div>'+(bks.length?'<button class="btn wide" data-act="exportAufmass">Aufmaßbuch als Excel</button>':'')+'</div>'+
   (off&&!arch?'<button class="btn danger wide" data-act="closeProj" data-id="'+p.id+'">Projekt abschließen</button>':'')+
   '</div>';
   var nb=$('.dbody',d);if(nb&&st)nb.scrollTop=st;
@@ -902,6 +902,43 @@ async function exportXlsx(){
   toast('Excel-Datei erstellt');
 }
 
+
+/* Aufmassbuch eines Projekts als Excel */
+async function exportAufmass(pid){
+  var p=proj(pid);if(!p)return;
+  try{await loadScript('vendor/xlsx.full.min.js')}catch(e){toast('Der Excel-Export konnte nicht geladen werden. Bitte einmal online öffnen.');return}
+  var off=isOffice(),dt=function(ms){return ms?new Date(ms):''};
+  var rows=[];
+  rows.push(['AUFMASSBUCH']);
+  rows.push(['Kunde',p.name]);
+  rows.push(['Kundennr.',p.kundennr||'']);
+  rows.push(['Adresse',p.addr||'']);
+  rows.push(['Telefon',p.phone||'']);
+  rows.push(['Stand',new Date()]);
+  rows.push([]);
+  rows.push(['ARBEITSSTUNDEN']);
+  rows.push(['Datum','Stunden','Gebucht von','Notiz']);
+  var hs=p.hours.slice().sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0});
+  hs.forEach(function(h){rows.push([new Date(h.date+'T12:00'),h.h,person(h.by).name,h.note||''])});
+  rows.push(['Summe Stunden',hoursTotal(p),'','']);
+  rows.push([]);
+  rows.push(['MATERIAL']);
+  rows.push(off?['Datum','Material','QR','Menge','Einheit','Einkaufspreis €','Wert €','Gebucht von']:['Datum','Material','QR','Menge','Einheit','Gebucht von']);
+  var tot=0,ms=p.mat.slice().sort(function(a,b){return a.at-b.at});
+  ms.forEach(function(b){
+    var m=mat(b.matId)||{name:'',qr:'',unit:'',price:0},val=m.price?Math.round(b.qty*m.price*100)/100:0;tot+=val;
+    rows.push(off?[dt(b.at),m.name,m.qr,b.qty,m.unit,m.price||'',val||'',person(b.by).name]:[dt(b.at),m.name,m.qr,b.qty,m.unit,person(b.by).name]);
+  });
+  if(off)rows.push(['Summe Materialwert','','','','','',Math.round(tot*100)/100,'']);
+  var ws=XLSX.utils.aoa_to_sheet(rows,{cellDates:true});
+  ws['!cols']=[{wch:16},{wch:36},{wch:12},{wch:10},{wch:10},{wch:16},{wch:12},{wch:18}];
+  var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Aufmaß');
+  var safe=String(p.name).replace(/[^\wäöüÄÖÜß\- ]+/g,'').trim().replace(/\s+/g,'_').slice(0,40)||'Projekt';
+  var out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellDates:true});
+  saveFile(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),'Aufmass_'+(p.kundennr?p.kundennr+'_':'')+safe+'_'+TODAY()+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  toast('Aufmaßbuch erstellt');
+}
+
 /* ---------- Einstellungen, Team ---------- */
 function ago(ms){
   if(!ms)return 'noch nie';
@@ -1010,6 +1047,7 @@ var actions={
   },
   syncNow:function(){toast(navigator.onLine?'Abgleich läuft…':'Kein Empfang – es wird übertragen, sobald du wieder online bist');sync()},
   export:function(){exportXlsx()},
+  exportAufmass:function(){exportAufmass(ui.detail)},
   team:sheetTeam,
   setRole:function(el){var p=C.profiles.filter(function(x){return x.id===el.dataset.id})[0];if(p&&p.role!==el.dataset.v){mut('profiles','up',{id:p.id,role:el.dataset.v});keepRender(sheetTeam)}},
   setActive:function(el){var p=C.profiles.filter(function(x){return x.id===el.dataset.id})[0];if(p){mut('profiles','up',{id:p.id,active:el.dataset.v==='1'});keepRender(sheetTeam)}},
