@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>strom-macher</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#EDF1F0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0D1211" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="strom-macher">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="robots" content="noindex,nofollow">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="sm-logo" viewBox="0 0 3067 3610"><g transform="matrix(1,0,0,1,-1745.666667,-579.333333)"><g transform="matrix(3.187457,0,0,3.293491,-1161.293832,-2457.265815)"><rect x="1318" y="1340" width="556" height="670" style="fill:rgb(255,225,108)"/><rect x="1120" y="1240" width="558" height="668" style="fill:rgb(129,221,144)"/><rect x="912" y="1132" width="558" height="670" style="fill:rgb(100,218,254)"/><path d="M1404,922L1260,1396L1432,1396L973,2018L1140,1536L956,1536L1404,922Z" style="fill:rgb(233,78,60)"/></g></g></symbol></svg>
+<div id="stage">
+<div class="device" id="app" data-tab="aufgaben">
+  <header class="top">
+    <button class="brand" data-act="home" aria-label="Zur Startseite">
+      <svg width="32" height="38" viewBox="0 0 3067 3610" aria-hidden="true"><use href="#sm-logo"/></svg>
+      <b>strom-macher</b>
+    </button>
+    <div class="topr"><button class="status" id="status" data-act="syncNow" aria-label="Abgleich">Online</button><button class="avatar" id="avatar" data-act="user" aria-label="Benutzer und Einstellungen"></button></div>
+  </header>
+  <main id="main">
+    <section id="tabBody" class="screen"></section>
+    <div id="bubbles" class="bubbles" aria-label="Aktuelle Projekte"></div>
+    <section id="detail" hidden></section>
+    <div id="layer"></div>
+  </main>
+  <nav class="nav" aria-label="Reiter">
+    <button class="navb" data-act="tab" data-tab="aufgaben">Aufgaben</button>
+    <button class="navb" data-act="tab" data-tab="lager">Lager</button>
+    <button class="navb" data-act="tab" data-tab="projekte">Projekte</button>
+  </nav>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="push" class="push" role="status"></div>
+  <div id="auth"></div>
+</div>
+</div>
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
