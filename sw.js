@@ -1,5 +1,5 @@
 /* strom-macher Service Worker: App-Dateien offline verfügbar halten */
-var V='sm-v3';
+var V='sm-v4';
 var SHELL=['./','index.html','app.css','app.js','config.js','manifest.webmanifest',
   'vendor/supabase.js','vendor/qrcode.js','vendor/html5-qrcode.min.js','vendor/xlsx.full.min.js',
   'fonts/outfit-latin-400-normal.woff2','fonts/outfit-latin-500-normal.woff2','fonts/outfit-latin-600-normal.woff2','fonts/outfit-latin-700-normal.woff2',

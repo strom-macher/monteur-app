@@ -1183,7 +1183,8 @@ document.addEventListener('input',function(e){
   }
   if(kind==='tp'){var s=$('#tp');if(s)s.innerHTML=projOptions(v,s.value,60);return}
   var n=0;
-  document.querySelectorAll('#flist .item').forEach(function(it){var hit=!v||it.dataset.q.indexOf(v)>-1;it.hidden=!hit;if(hit)n++});
+  var words=v.split(/\s+/).filter(Boolean);
+  document.querySelectorAll('#flist .item').forEach(function(it){var dq=it.dataset.q;var hit=words.every(function(w){return dq.indexOf(w)>-1});it.hidden=!hit;if(hit)n++});
   var nr2=$('#nores');if(nr2)nr2.hidden=n>0;
 });
 document.addEventListener('change',function(e){

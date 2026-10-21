@@ -25,6 +25,7 @@ body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:1
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:14px}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
+[hidden]{display:none!important}
 html,body,button,a,input,select,textarea,label,[data-act]{touch-action:manipulation}
 h1,h2,h3,p{margin:0}
 :focus-visible{outline:3px solid color-mix(in srgb,var(--tab) 70%,var(--ink));outline-offset:2px}
