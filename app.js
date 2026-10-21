@@ -54,9 +54,13 @@ var COLS={
   hours:['id','project_id','work_date','h','note','created_by','created_at'],
   materials:['id','name','unit','min_stock','note'],
   material_costs:['material_id','price','supplier','artnr'],
-  stock_moves:['id','material_id','project_id','qty','kind','note','created_by','created_at'],
+  stock_moves:['id','material_id','project_id','qty','kind','loc','note','created_by','created_at'],
   delivery_suppliers:['move_id','supplier']
 };
+var LOCS=[{k:'haupt',n:'Hauptlager'},{k:'buero',n:'Büro'},{k:'gross',n:'Großwagen'},{k:'klein',n:'Kleinwagen'}];
+var LOCK=LOCS.map(function(l){return l.k});
+var locName=function(k){for(var i=0;i<LOCS.length;i++)if(LOCS[i].k===k)return LOCS[i].n;return 'Hauptlager'};
+var locOf=function(m){return LOCK.indexOf(m.loc)>=0?m.loc:'haupt'};
 var PK=function(t){return t==='material_costs'?'material_id':t==='delivery_suppliers'?'move_id':'id'};
 function pick(t,row){var o={};COLS[t].forEach(function(c){if(row[c]!==undefined)o[c]=row[c]});return o}
 function emptyC(){var c={me:null,pulledAt:0};TABLES.forEach(function(t){c[t]=[]});return c}
@@ -83,17 +87,21 @@ function build(){
   var costs={},dsup={};
   C.material_costs.forEach(function(c){costs[c.material_id]=c});
   C.delivery_suppliers.forEach(function(d){dsup[d.move_id]=d.supplier});
-  var stock={},dels={},bk={};
+  var stock={},sloc={},dels={},bk={},tr={};
   C.stock_moves.forEach(function(m){
-    stock[m.material_id]=(stock[m.material_id]||0)+Number(m.qty);
-    if(m.kind==='anfang'||m.kind==='lieferung'||(m.kind==='korrektur'&&Number(m.qty)>0))(dels[m.material_id]=dels[m.material_id]||[]).push({id:m.id,date:iso(new Date(msOf(m.created_at))),at:msOf(m.created_at),qty:Number(m.qty),supplier:dsup[m.id]||'',note:m.kind==='anfang'?'Anfangsbestand':(m.note||''),by:m.created_by});
-    if(m.kind==='buchung'&&m.project_id)(bk[m.project_id]=bk[m.project_id]||[]).push({id:m.id,matId:m.material_id,qty:-Number(m.qty),at:msOf(m.created_at),by:m.created_by});
+    var lo=locOf(m),q=Number(m.qty);
+    stock[m.material_id]=(stock[m.material_id]||0)+q;
+    var sl=sloc[m.material_id]=sloc[m.material_id]||{};sl[lo]=(sl[lo]||0)+q;
+    if(m.kind==='anfang'||m.kind==='lieferung'||(m.kind==='korrektur'&&q>0))(dels[m.material_id]=dels[m.material_id]||[]).push({id:m.id,date:iso(new Date(msOf(m.created_at))),at:msOf(m.created_at),qty:q,loc:lo,supplier:dsup[m.id]||'',note:m.kind==='anfang'?'Anfangsbestand':(m.note||''),by:m.created_by});
+    if(m.kind==='buchung'&&m.project_id)(bk[m.project_id]=bk[m.project_id]||[]).push({id:m.id,matId:m.material_id,qty:-q,loc:lo,at:msOf(m.created_at),by:m.created_by});
+    if(m.kind==='umbuchung')(tr[m.material_id]=tr[m.material_id]||[]).push({id:m.id,qty:q,loc:lo,at:msOf(m.created_at),by:m.created_by,note:m.note||''});
   });
+  var r3=function(x){return Math.round((x||0)*1000)/1000};
   S.mats=C.materials.map(function(m){
     var c=costs[m.id]||{};
     var d=(dels[m.id]||[]).sort(function(a,b){return b.at-a.at});
     return {id:m.id,name:m.name,unit:m.unit||'Stk',min:Number(m.min_stock)||0,note:m.note||'',qr:m.qr||'',
-      stock:Math.round((stock[m.id]||0)*1000)/1000,price:Number(c.price)||0,supplier:c.supplier||'',artnr:c.artnr||'',deliveries:d};
+      stock:r3(stock[m.id]),locs:LOCK.reduce(function(o,k){o[k]=r3((sloc[m.id]||{})[k]);return o},{}),transfers:(tr[m.id]||[]).sort(function(a,b){return b.at-a.at}),price:Number(c.price)||0,supplier:c.supplier||'',artnr:c.artnr||'',deliveries:d};
   });
   var hrs={},pho={};
   C.hours.forEach(function(h){(hrs[h.project_id]=hrs[h.project_id]||[]).push({id:h.id,date:h.work_date,h:Number(h.h),note:h.note||'',at:msOf(h.created_at),by:h.created_by})});
@@ -328,12 +336,13 @@ function tabAufgaben(){
 }
 function tabLager(){
   var low=S.mats.filter(isLow).sort(function(a,b){return a.stock/a.min-b.stock/b.min});
-  var lowHtml=low.length?'<div class="lowbox rise" style="--i:3"><div class="sec"><span>Unter Mindestbestand</span><span class="tag red">'+low.length+'</span></div><div class="list">'+low.slice(0,3).map(function(m){
+  var lowHtml=low.length?'<div class="lowbox rise" style="--i:4"><div class="sec"><span>Unter Mindestbestand</span><span class="tag red">'+low.length+'</span></div><div class="list">'+low.slice(0,3).map(function(m){
       return '<button class="item" data-act="openMat" data-id="'+m.id+'"><span class="grow"><span class="t">'+esc(m.name)+'</span><span class="s">Mindestbestand '+nf(m.min,0)+' '+esc(m.unit)+'</span></span><span class="r num" style="color:var(--red)">'+nf(m.stock,0)+' '+esc(m.unit)+'</span></button>'}).join('')+'</div></div>'
-    :'<p class="hint rise" style="--i:3">'+(S.mats.length?'Alle Bestände liegen über dem Mindestbestand.':(isOffice()?'Noch kein Material im Lager. Lege mit „Material anlegen“ das erste an.':'Noch kein Material im Lager.'))+'</p>';
+    :'<p class="hint rise" style="--i:4">'+(S.mats.length?'Alle Bestände liegen über dem Mindestbestand.':(isOffice()?'Noch kein Material im Lager. Lege mit „Material anlegen“ das erste an.':'Noch kein Material im Lager.'))+'</p>';
   return '<div class="titlebar rise" style="--i:0"><div class="pill">Lager</div><button class="plus" data-act="delivery" aria-label="Lieferung verbuchen">+</button></div>'+
     '<div class="body">'+(isOffice()?'<button class="btn main wide rise" style="--i:1" data-act="newMat">Material anlegen</button>':'')+
-    '<div class="row2 rise" style="--i:2"><button class="btn" data-act="matSearch">'+ico.search+'Suchen</button><button class="btn" data-act="scan" data-next="detail">'+ico.qr+'Scannen</button></div>'+lowHtml+'</div>';
+    '<div class="row2 rise" style="--i:2"><button class="btn" data-act="matSearch">'+ico.search+'Suchen</button><button class="btn" data-act="scan" data-next="detail">'+ico.qr+'Scannen</button></div>'+
+    '<div class="rise" style="--i:3"><div class="sec" style="margin-bottom:8px">Lagerorte</div><div class="loctiles">'+LOCS.map(function(l){var n=S.mats.filter(function(m){return m.locs[l.k]>0}).length;return '<button type="button" data-act="locList" data-v="'+l.k+'" aria-label="'+l.n+': '+n+' Materialien"><span>'+l.n+'</span><b class="num">'+n+'</b></button>'}).join('')+'</div></div>'+lowHtml+'</div>';
 }
 function tabProjekte(){
   var soon=activeProjects().filter(function(p){return p.termin===TODAY()||p.termin===dayOff(1)}).sort(function(a,b){return a.termin<b.termin?-1:1});
@@ -407,7 +416,7 @@ function renderDetail(keep){
     var del=function(t){return (arch||!canStorno(b.x.by))?'':'<button class="del" data-act="delBk" data-t="'+t+'" data-id="'+b.id+'" aria-label="Buchung stornieren">'+ico.x+'</button>'};
     if(b.t==='h')return '<div class="bk"><span class="bi h">'+ico.clock+'</span><div class="grow"><div class="t num">'+nf(b.x.h)+' h</div><div class="s">'+esc(fmtDate(b.x.date))+' · '+esc(first(person(b.x.by).name))+(b.x.note?' · '+esc(b.x.note):'')+'</div></div>'+del('h')+'</div>';
     var m=mat(b.x.matId)||{name:'Material',unit:''};
-    return '<div class="bk"><span class="bi m">'+ico.box+'</span><div class="grow"><div class="t">'+esc(m.name)+'</div><div class="s num">'+nf(b.x.qty,1)+' '+esc(m.unit)+' · '+esc(fmtTs(b.at))+' · '+esc(first(person(b.x.by).name))+'</div></div>'+del('m')+'</div>';
+    return '<div class="bk"><span class="bi m">'+ico.box+'</span><div class="grow"><div class="t">'+esc(m.name)+'</div><div class="s num">'+nf(b.x.qty,1)+' '+esc(m.unit)+' · '+esc(locName(b.x.loc))+' · '+esc(fmtTs(b.at))+' · '+esc(first(person(b.x.by).name))+'</div></div>'+del('m')+'</div>';
   }).join(''):'<p class="hint">Noch nichts gebucht.</p>';
   var photos=p.photos.map(function(f){var u=PH_URL[f.id]||'';return '<button class="ph" data-act="viewPhoto" data-id="'+f.id+'" aria-label="Foto vom '+esc(fmtTs(f.at))+' ansehen"><img alt="" '+(u?'src="'+u+'"':'')+' data-path="'+esc(f.path)+'" data-id="'+f.id+'"></button>'}).join('');
   var addPh=arch?'':'<button class="phadd" data-act="photoCam">'+ico.cam+'Kamera</button><button class="phadd" data-act="photoGal">'+ico.img+'Galerie</button>';
@@ -565,8 +574,25 @@ function sheetProjList(mode){
 }
 
 /* Material: Suche */
-function matRow(m,act){
-  return '<button class="item" data-act="'+act+'" data-id="'+m.id+'" data-q="'+esc((m.name+' '+m.artnr+' '+m.supplier+' '+m.qr).toLowerCase())+'"><span class="grow"><span class="t">'+esc(m.name)+'</span><span class="s">'+esc(m.qr||'QR folgt')+(isOffice()&&m.supplier?' · '+esc(m.supplier):'')+'</span></span>'+(isLow(m)?'<span class="rd" title="Unter Mindestbestand"></span>':'')+'<span class="r num">'+nf(m.stock,0)+' '+esc(m.unit)+'</span></button>';
+function matRow(m,act,lk){
+  var qn=lk?m.locs[lk]:m.stock;
+  return '<button class="item" data-act="'+act+'" data-id="'+m.id+'" data-q="'+esc((m.name+' '+m.artnr+' '+m.supplier+' '+m.qr).toLowerCase())+'"><span class="grow"><span class="t">'+esc(m.name)+'</span><span class="s">'+esc(m.qr||'QR folgt')+(isOffice()&&m.supplier?' · '+esc(m.supplier):'')+'</span></span>'+(isLow(m)?'<span class="rd" title="Unter Mindestbestand"></span>':'')+'<span class="r num">'+nf(qn,0)+' '+esc(m.unit)+'</span></button>';
+}
+function sheetLocList(k){
+  var ms=S.mats.filter(function(m){return m.locs[k]>0}).sort(function(a,b){return a.name.localeCompare(b.name,'de')});
+  var body='<div class="form" style="gap:10px">'+(ms.length?'<div class="fld"><input id="q" type="search" data-filter="1" placeholder="Material suchen" aria-label="Material suchen" autocomplete="off"></div><div class="list" id="flist">'+ms.map(function(m){return matRow(m,'openMat',k)}).join('')+'</div><p class="hint" id="nores" hidden>Kein Material gefunden.</p>':'<div class="empty"><b>'+esc(locName(k))+' ist leer</b>Über „Umbuchen“ im Material oder eine Lieferung kommt Bestand hierher.</div>')+'</div>';
+  openSheet('locList',sheetShell(locName(k),ms.length+' '+(ms.length===1?'Material':'Materialien')+' mit Bestand',body,'30%'));
+}
+/* Lagerort-Auswahl (2x2) */
+function lastLoc(){try{var v=localStorage.getItem('sm-loc');if(LOCK.indexOf(v)>=0)return v}catch(e){}return 'haupt'}
+function setLastLoc(k){try{localStorage.setItem('sm-loc',k)}catch(e){}}
+function locSeg(g,sel,mt){
+  return '<div class="locseg" role="group">'+LOCS.map(function(l){var on=l.k===sel;return '<button type="button" class="'+(on?'on':'')+'" aria-pressed="'+on+'" data-act="locPick" data-g="'+g+'" data-v="'+l.k+'"><b>'+l.n+'</b>'+(mt?'<span class="num">'+nf(mt.locs[l.k],1)+' '+esc(mt.unit)+'</span>':'')+'</button>'}).join('')+'</div>';
+}
+function bestLoc(mt,pref){
+  if(mt.locs[pref]>0)return pref;
+  for(var i=0;i<LOCK.length;i++)if(mt.locs[LOCK[i]]>0)return LOCK[i];
+  return pref;
 }
 function sheetMatList(){
   var rows=S.mats.slice().sort(function(a,b){return a.name.localeCompare(b.name,'de')}).map(function(m){return matRow(m,'openMat')}).join('');
@@ -594,7 +620,7 @@ function submitMatNew(){
   var id=uuid(),now=new Date().toISOString();
   mut('materials','up',{id:id,name:val('mn'),unit:val('mu')||'Stk',min_stock:num('mm')||0,note:nz(val('mno'))});
   mut('material_costs','up',{material_id:id,price:num('mpr')||null,supplier:nz(val('msu')),artnr:nz(val('mar'))});
-  if(st>0)mut('stock_moves','up',{id:uuid(),material_id:id,project_id:null,qty:st,kind:'anfang',note:null,created_by:ME.id,created_at:now});
+  if(st>0)mut('stock_moves','up',{id:uuid(),material_id:id,project_id:null,qty:st,kind:'anfang',loc:'haupt',note:null,created_by:ME.id,created_at:now});
   toast('Material angelegt');sheetMatDetail(id,true);
 }
 
@@ -606,18 +632,35 @@ function bookingsOfMat(id){
 function sheetMatDetail(id,justNew){
   var m=mat(id);if(!m)return;var off=isOffice(),low=isLow(m);ui.curMat=id;ui.qrPending=!m.qr;
   var ratio=m.min?Math.min(1,m.stock/(m.min*2)):1;
-  var dels=m.deliveries.slice(0,4).map(function(d){return '<div class="bk" style="min-height:50px"><div class="grow"><div class="t num">+'+nf(d.qty,1)+' '+esc(m.unit)+'</div><div class="s">'+esc(fmtDate(d.date))+(off&&d.supplier?' · '+esc(d.supplier):'')+(d.note?' · '+esc(d.note):'')+'</div></div></div>'}).join('')||'<p class="hint">Noch keine Lieferung erfasst.</p>';
-  var bks=bookingsOfMat(id).slice(0,4).map(function(x){return '<div class="bk" style="min-height:50px"><div class="grow"><div class="t num">−'+nf(x.b.qty,1)+' '+esc(m.unit)+' · '+esc(x.p.name)+'</div><div class="s">'+esc(fmtTs(x.b.at))+'</div></div></div>'}).join('')||'<p class="hint">Noch auf kein Projekt gebucht.</p>';
+  var dels=m.deliveries.slice(0,4).map(function(d){return '<div class="bk" style="min-height:50px"><div class="grow"><div class="t num">+'+nf(d.qty,1)+' '+esc(m.unit)+' · '+esc(locName(d.loc))+'</div><div class="s">'+esc(fmtDate(d.date))+(off&&d.supplier?' · '+esc(d.supplier):'')+(d.note?' · '+esc(d.note):'')+'</div></div></div>'}).join('')||'<p class="hint">Noch keine Lieferung erfasst.</p>';
+  var bks=bookingsOfMat(id).slice(0,4).map(function(x){return '<div class="bk" style="min-height:50px"><div class="grow"><div class="t num">−'+nf(x.b.qty,1)+' '+esc(m.unit)+' · '+esc(x.p.name)+'</div><div class="s">'+esc(fmtTs(x.b.at))+' · aus '+esc(locName(x.b.loc))+'</div></div></div>'}).join('')||'<p class="hint">Noch auf kein Projekt gebucht.</p>';
+  var trs=transferPairs(m).slice(0,4).map(function(t){return '<div class="bk" style="min-height:50px"><div class="grow"><div class="t num">'+nf(t.qty,1)+' '+esc(m.unit)+' · '+esc(locName(t.from))+' → '+esc(locName(t.to))+'</div><div class="s">'+esc(fmtTs(t.at))+' · '+esc(first(person(t.by).name))+'</div></div>'+(canStorno(t.by)?'<button class="del" data-act="delTr" data-ids="'+t.ids.join(',')+'" data-id="'+m.id+'" aria-label="Umbuchung stornieren">'+ico.x+'</button>':'')+'</div>'}).join('');
+  var locTiles='<div class="loctiles">'+LOCS.map(function(l){var v=m.locs[l.k];return '<button type="button" data-act="locList" data-v="'+l.k+'"'+(v?'':' class="zero"')+'><span>'+l.n+'</span><b class="num">'+nf(v,1)+'</b></button>'}).join('')+'</div>';
   var fields=(off?
     '<div class="grid2">'+fld('mu2','Einheit','<input id="mu2" value="'+esc(m.unit)+'">')+fld('mm2','Mindestbestand','<input id="mm2" inputmode="decimal" value="'+esc(String(m.min).replace('.',','))+'">')+'</div>'+
     '<div class="grid2">'+fld('mpr2','Einkaufspreis (€)','<input id="mpr2" inputmode="decimal" value="'+esc(String(m.price||'').replace('.',','))+'">')+fld('mar2','Artikelnr.','<input id="mar2" value="'+esc(m.artnr)+'">')+'</div>'+
     fld('msu2','Lieferant','<input id="msu2" value="'+esc(m.supplier)+'">'):'')+
     fld('mno2','Notiz','<textarea id="mno2" placeholder="Kurze Notiz für das Team">'+esc(m.note)+'</textarea>');
-  var body='<div class="form" style="gap:16px"><div><div class="big num" style="color:'+(low?'var(--red)':'var(--ink)')+'">'+nf(m.stock,1)+'<span style="font-size:22px"> '+esc(m.unit)+'</span></div><div class="hint" style="margin:6px 0 8px">'+(m.min?'Mindestbestand '+nf(m.min,1)+' '+esc(m.unit)+(low?' · unterschritten':''):'Kein Mindestbestand festgelegt')+'</div><div class="bar'+(low?' low':'')+'"><i style="transform:scaleX('+ratio.toFixed(3)+')"></i></div></div>'+
-    '<div class="row2"><button class="btn main" data-act="delivery" data-id="'+m.id+'">+ Lieferung</button><button class="btn" data-act="qr" data-id="'+m.id+'">'+ico.qr+'QR-Code</button></div>'+
+  var body='<div class="form" style="gap:16px"><div><div class="big num" style="color:'+(low?'var(--red)':'var(--ink)')+'">'+nf(m.stock,1)+'<span style="font-size:22px"> '+esc(m.unit)+'</span></div><div class="hint" style="margin:6px 0 8px">'+(m.min?'Mindestbestand '+nf(m.min,1)+' '+esc(m.unit)+(low?' · unterschritten':''):'Kein Mindestbestand festgelegt')+'</div><div class="bar'+(low?' low':'')+'"><i style="transform:scaleX('+ratio.toFixed(3)+')"></i></div></div>'+locTiles+
+    '<div class="row2"><button class="btn main" data-act="delivery" data-id="'+m.id+'">+ Lieferung</button><button class="btn" data-act="transfer" data-id="'+m.id+'">Umbuchen</button></div>'+
+    '<button class="btn wide" data-act="qr" data-id="'+m.id+'">'+ico.qr+'QR-Code</button>'+
     '<form class="form" data-submit="saveMatEdit" data-id="'+m.id+'" novalidate>'+fields+'<button class="btn wide" type="submit">'+(off?'Änderungen speichern':'Notiz speichern')+'</button></form>'+
-    '<div><div class="sec" style="margin-bottom:4px">Letzte Lieferungen</div>'+dels+'</div><div><div class="sec" style="margin-bottom:4px">Letzte Buchungen auf Projekte</div>'+bks+'</div></div>';
+    '<div><div class="sec" style="margin-bottom:4px">Letzte Lieferungen</div>'+dels+'</div><div><div class="sec" style="margin-bottom:4px">Letzte Buchungen auf Projekte</div>'+bks+'</div>'+(trs?'<div><div class="sec" style="margin-bottom:4px">Letzte Umbuchungen</div>'+trs+'</div>':'')+'</div>';
   openSheet('matDetail',sheetShell(m.name,(m.qr||'QR folgt')+(off&&m.supplier?' · '+m.supplier:''),body,'50%'));
+}
+function transferPairs(m){
+  var by={},out=[];
+  m.transfers.forEach(function(t){var k=t.at+'|'+t.by;(by[k]=by[k]||[]).push(t)});
+  Object.keys(by).forEach(function(k){
+    var g=by[k],neg=g.filter(function(t){return t.qty<0}),pos=g.filter(function(t){return t.qty>0});
+    neg.forEach(function(n){
+      var i=-1;for(var j=0;j<pos.length;j++)if(Math.abs(pos[j].qty+n.qty)<1e-9){i=j;break}
+      var p=i>=0?pos.splice(i,1)[0]:null;
+      out.push({at:n.at,by:n.by,qty:-n.qty,from:n.loc,to:p?p.loc:n.loc,ids:p?[n.id,p.id]:[n.id]});
+    });
+    pos.forEach(function(p){out.push({at:p.at,by:p.by,qty:p.qty,from:p.loc,to:p.loc,ids:[p.id]})});
+  });
+  return out.sort(function(a,b){return b.at-a.at});
 }
 function submitMatEdit(id){
   var m=mat(id);if(!m)return;
@@ -635,6 +678,7 @@ function matUse(){
 }
 function sheetMat(){
   var m=ui.m,mt=m.sel&&mat(m.sel),book=m.mode==='book',p=m.pid&&proj(m.pid);
+  if(mt&&!m.loc)m.loc=book?bestLoc(mt,lastLoc()):'haupt';
   var title=book?'Material buchen':'Lieferung verbuchen',sub=book&&p?'auf Projekt '+p.name:'Bestand erhöhen';
   var body;
   if(!mt){
@@ -646,22 +690,24 @@ function sheetMat(){
   }else{
     var chips=(mt.unit==='m'?[10,50,100]:[1,5,10]).map(function(n){return '<button type="button" class="chip" data-act="qtyAdd" data-v="'+n+'">+'+n+'</button>'}).join('');
     body='<form class="form" data-submit="'+(book?'saveBook':'saveDelivery')+'" novalidate>'+
-      '<div class="banner" style="flex-direction:row;align-items:center;justify-content:space-between"><div style="min-width:0"><b style="font-family:var(--f-display)">'+esc(mt.name)+'</b><div class="hint num">Bestand '+nf(mt.stock,1)+' '+esc(mt.unit)+'</div></div><button type="button" class="btn small" data-act="unpick">Ändern</button></div>'+
+      '<div class="banner" style="flex-direction:row;align-items:center;justify-content:space-between"><div style="min-width:0"><b style="font-family:var(--f-display)">'+esc(mt.name)+'</b><div class="hint num">Bestand gesamt '+nf(mt.stock,1)+' '+esc(mt.unit)+'</div></div><button type="button" class="btn small" data-act="unpick">Ändern</button></div>'+
+      '<div class="fld" id="f-loc"><label>'+(book?'Entnommen aus':'Eingelagert in')+'</label>'+locSeg('loc',m.loc,mt)+'<div class="err" id="e-loc"></div></div>'+
       '<div class="fld" id="f-qty"><label for="qty">Menge ('+esc(mt.unit)+')</label><div class="stepper"><button type="button" class="btn" data-act="qtyStep" data-v="-1" aria-label="Weniger">−</button><input id="qty" type="text" inputmode="decimal" value="'+esc(String(m.qty).replace('.',','))+'"><button type="button" class="btn" data-act="qtyStep" data-v="1" aria-label="Mehr">+</button></div><div class="chips">'+chips+'</div><div class="err" id="e-qty"></div></div>'+
       (book?'':(isOffice()?fld('dsu','Lieferant','<input id="dsu" value="'+esc(mt.supplier)+'">'):'')+fld('dno','Lieferschein (optional)','<input id="dno" autocomplete="off">'))+
       '<button class="btn main wide" type="submit">'+(book?'Auf Projekt buchen':'Lieferung einbuchen')+'</button></form>';
   }
   openSheet('mat',sheetShell(title,sub,body,'50%'));
 }
-function openMatFlow(mode,pid,sel){ui.m={mode:mode,pid:pid||null,sel:sel||null,qty:1};sheetMat()}
+function openMatFlow(mode,pid,sel){ui.m={mode:mode,pid:pid||null,sel:sel||null,qty:1,loc:null};sheetMat()}
 function submitBook(){
   var mt=mat(ui.m.sel),p=proj(ui.m.pid),q=num('qty');
   if(!(q>0)){setErr('qty','Bitte eine Menge über 0 eingeben.');return}
-  if(q>mt.stock){setErr('qty','Nur '+nf(mt.stock,1)+' '+mt.unit+' im Lager.');return}
+  var lo=ui.m.loc||'haupt',have=mt.locs[lo]||0;
+  if(q>have){setErr('qty',have>0?'Im Lagerort '+locName(lo)+' sind nur '+nf(have,1)+' '+mt.unit+'.':'Im Lagerort '+locName(lo)+' ist nichts davon. Anderen Lagerort wählen.');return}
   var was=isLow(mt);
-  closeSheet();
-  mut('stock_moves','up',{id:uuid(),material_id:mt.id,project_id:p.id,qty:-q,kind:'buchung',note:null,created_by:ME.id,created_at:new Date().toISOString()});
-  toast(nf(q,1)+' '+mt.unit+' '+mt.name.split(',')[0]+' gebucht'+(!was&&isLow(mat(mt.id))?' · Mindestbestand unterschritten':''));
+  closeSheet();setLastLoc(lo);
+  mut('stock_moves','up',{id:uuid(),material_id:mt.id,project_id:p.id,qty:-q,kind:'buchung',loc:lo,note:null,created_by:ME.id,created_at:new Date().toISOString()});
+  toast(nf(q,1)+' '+mt.unit+' '+mt.name.split(',')[0]+' aus '+locName(lo)+' gebucht'+(!was&&isLow(mat(mt.id))?' · Mindestbestand unterschritten':''));
 }
 function submitDelivery(){
   var mt=mat(ui.m.sel),q=num('qty');
@@ -669,12 +715,38 @@ function submitDelivery(){
   var sup=isOffice()&&$('#dsu')?val('dsu'):'';
   var mid=uuid();
   closeSheet();
-  mut('stock_moves','up',{id:mid,material_id:mt.id,project_id:null,qty:q,kind:'lieferung',note:nz(val('dno')),created_by:ME.id,created_at:new Date().toISOString()});
+  var lo=ui.m.loc||'haupt';
+  mut('stock_moves','up',{id:mid,material_id:mt.id,project_id:null,qty:q,kind:'lieferung',loc:lo,note:nz(val('dno')),created_by:ME.id,created_at:new Date().toISOString()});
   if(isOffice()&&sup){
     mut('delivery_suppliers','up',{move_id:mid,supplier:sup});
     if(sup!==mt.supplier)mut('material_costs','up',{material_id:mt.id,supplier:sup});
   }
-  toast('+'+nf(q,1)+' '+mt.unit+' eingebucht · Bestand '+nf(mat(mt.id).stock,1));
+  toast('+'+nf(q,1)+' '+mt.unit+' eingebucht ('+locName(lo)+') · Bestand '+nf(mat(mt.id).stock,1));
+}
+
+/* Umbuchen zwischen Lagerorten */
+function sheetTransfer(id){
+  var mt=mat(id);if(!mt)return;
+  var from=bestLoc(mt,'haupt'),to=lastLoc();if(to===from)to=from==='haupt'?'gross':'haupt';
+  ui.m={mode:'tr',sel:id,loc:from,to:to,qty:1};
+  var body='<form class="form" data-submit="saveTransfer" novalidate>'+
+    '<div class="fld" id="f-loc"><label>Von</label>'+locSeg('loc',from,mt)+'<div class="err" id="e-loc"></div></div>'+
+    '<div class="fld" id="f-to"><label>Nach</label>'+locSeg('to',to,mt)+'<div class="err" id="e-to"></div></div>'+
+    '<div class="fld" id="f-qty"><label for="qty">Menge ('+esc(mt.unit)+')</label><div class="stepper"><button type="button" class="btn" data-act="qtyStep" data-v="-1" aria-label="Weniger">−</button><input id="qty" type="text" inputmode="decimal" value="1"><button type="button" class="btn" data-act="qtyStep" data-v="1" aria-label="Mehr">+</button></div><div class="chips">'+(mt.unit==='m'?[10,50,100]:[1,5,10]).map(function(n){return '<button type="button" class="chip" data-act="qtyAdd" data-v="'+n+'">+'+n+'</button>'}).join('')+'<button type="button" class="chip" data-act="qtyAll">Alles</button></div><div class="err" id="e-qty"></div></div>'+
+    '<button class="btn main wide" type="submit">Umbuchen</button></form>';
+  openSheet('transfer',sheetShell('Umbuchen',mt.name,body,'50%'));
+}
+function submitTransfer(){
+  var mt=mat(ui.m.sel),q=num('qty'),a=ui.m.loc,b=ui.m.to;if(!mt)return;
+  if(a===b){setErr('to','Bitte einen anderen Lagerort als bei „Von“ wählen.');return}setErr('to','');
+  if(!(q>0)){setErr('qty','Bitte eine Menge über 0 eingeben.');return}
+  var have=mt.locs[a]||0;
+  if(q>have){setErr('qty',have>0?'Im Lagerort '+locName(a)+' sind nur '+nf(have,1)+' '+mt.unit+'.':'Im Lagerort '+locName(a)+' ist nichts davon.');return}
+  var now=new Date().toISOString();setLastLoc(b);
+  mut('stock_moves','up',{id:uuid(),material_id:mt.id,project_id:null,qty:-q,kind:'umbuchung',loc:a,note:null,created_by:ME.id,created_at:now});
+  mut('stock_moves','up',{id:uuid(),material_id:mt.id,project_id:null,qty:q,kind:'umbuchung',loc:b,note:null,created_by:ME.id,created_at:now});
+  toast(nf(q,1)+' '+mt.unit+' von '+locName(a)+' nach '+locName(b)+' umgebucht');
+  sheetMatDetail(mt.id);
 }
 
 /* Stunden */
@@ -880,18 +952,22 @@ async function exportXlsx(){
   var mrows=[];
   S.projects.forEach(function(p){p.mat.forEach(function(b){
     var m=mat(b.matId)||{name:'',qr:'',unit:'',price:0};
-    mrows.push([dt(b.at),p.name,p.kundennr,m.name,m.qr,b.qty,m.unit,isOffice()?m.price||'':'',isOffice()&&m.price?Math.round(b.qty*m.price*100)/100:'',person(b.by).name]);
+    mrows.push([dt(b.at),p.name,p.kundennr,m.name,m.qr,b.qty,m.unit,locName(b.loc),isOffice()?m.price||'':'',isOffice()&&m.price?Math.round(b.qty*m.price*100)/100:'',person(b.by).name]);
   })});
   mrows.sort(function(a,b){return b[0]-a[0]});
-  sheet('Materialbuchungen',['Datum','Projekt','Kundennr.','Material','QR','Menge','Einheit','Einkaufspreis €','Wert €','Gebucht von'],mrows,[14,28,11,34,10,9,9,14,10,18]);
-  sheet('Lager',['QR','Material','Einheit','Bestand','Mindestbestand','Unter Mindestbestand','Einkaufspreis €','Lagerwert €','Lieferant','Artikelnr.','Notiz'],
+  sheet('Materialbuchungen',['Datum','Projekt','Kundennr.','Material','QR','Menge','Einheit','Entnommen aus','Einkaufspreis €','Wert €','Gebucht von'],mrows,[14,28,11,34,10,9,9,14,14,10,18]);
+  sheet('Lager',['QR','Material','Einheit','Bestand gesamt'].concat(LOCS.map(function(l){return l.n}),['Mindestbestand','Unter Mindestbestand','Einkaufspreis €','Lagerwert €','Lieferant','Artikelnr.','Notiz']),
     S.mats.slice().sort(function(a,b){return a.name.localeCompare(b.name,'de')}).map(function(m){
-      return [m.qr,m.name,m.unit,m.stock,m.min,isLow(m)?'Ja':'Nein',m.price||'',m.price?Math.round(m.stock*m.price*100)/100:'',m.supplier,m.artnr,m.note];
-    }),[10,36,9,9,14,12,14,12,22,16,30]);
+      return [m.qr,m.name,m.unit,m.stock].concat(LOCK.map(function(k){return m.locs[k]}),[m.min,isLow(m)?'Ja':'Nein',m.price||'',m.price?Math.round(m.stock*m.price*100)/100:'',m.supplier,m.artnr,m.note]);
+    }),[10,36,9,12,12,9,11,11,14,12,14,12,22,16,30]);
   var drows=[];
-  S.mats.forEach(function(m){m.deliveries.forEach(function(d){drows.push([dt(d.at),m.name,m.qr,d.qty,m.unit,d.supplier,d.note,person(d.by).name])})});
+  S.mats.forEach(function(m){m.deliveries.forEach(function(d){drows.push([dt(d.at),m.name,m.qr,d.qty,m.unit,locName(d.loc),d.supplier,d.note,person(d.by).name])})});
   drows.sort(function(a,b){return b[0]-a[0]});
-  sheet('Lieferungen',['Datum','Material','QR','Menge','Einheit','Lieferant','Notiz / Lieferschein','Erfasst von'],drows,[14,36,10,9,9,22,26,18]);
+  sheet('Lieferungen',['Datum','Material','QR','Menge','Einheit','Lagerort','Lieferant','Notiz / Lieferschein','Erfasst von'],drows,[14,36,10,9,9,13,22,26,18]);
+  var trows=[];
+  S.mats.forEach(function(m){transferPairs(m).forEach(function(t){trows.push([dt(t.at),m.name,m.qr,t.qty,m.unit,locName(t.from),locName(t.to),person(t.by).name])})});
+  trows.sort(function(a,b){return b[0]-a[0]});
+  sheet('Umbuchungen',['Datum','Material','QR','Menge','Einheit','Von','Nach','Gebucht von'],trows,[14,36,10,9,9,13,13,18]);
   sheet('Aufgaben',['Aufgabe','Projekt','Kundennr.','Bearbeiter','Termin','Uhrzeit','Status','Erledigt am','Angelegt am','Angelegt von'],
     S.tasks.slice().sort(function(a,b){return b.created-a.created}).map(function(t){
       return [t.name,pn(t.project),pk(t.project),t.assignee?person(t.assignee).name:'',t.due?new Date(t.due+'T12:00'):'',String(t.time||'').slice(0,5),t.done?'Erledigt':'Offen',dt(t.doneAt),dt(t.created),t.by?person(t.by).name:''];
@@ -923,15 +999,15 @@ async function exportAufmass(pid){
   rows.push(['Summe Stunden',hoursTotal(p),'','']);
   rows.push([]);
   rows.push(['MATERIAL']);
-  rows.push(off?['Datum','Material','QR','Menge','Einheit','Einkaufspreis €','Wert €','Gebucht von']:['Datum','Material','QR','Menge','Einheit','Gebucht von']);
+  rows.push(off?['Datum','Material','QR','Menge','Einheit','Einkaufspreis €','Wert €','Gebucht von','Entnommen aus']:['Datum','Material','QR','Menge','Einheit','Gebucht von','Entnommen aus']);
   var tot=0,ms=p.mat.slice().sort(function(a,b){return a.at-b.at});
   ms.forEach(function(b){
     var m=mat(b.matId)||{name:'',qr:'',unit:'',price:0},val=m.price?Math.round(b.qty*m.price*100)/100:0;tot+=val;
-    rows.push(off?[dt(b.at),m.name,m.qr,b.qty,m.unit,m.price||'',val||'',person(b.by).name]:[dt(b.at),m.name,m.qr,b.qty,m.unit,person(b.by).name]);
+    rows.push(off?[dt(b.at),m.name,m.qr,b.qty,m.unit,m.price||'',val||'',person(b.by).name,locName(b.loc)]:[dt(b.at),m.name,m.qr,b.qty,m.unit,person(b.by).name,locName(b.loc)]);
   });
   if(off)rows.push(['Summe Materialwert','','','','','',Math.round(tot*100)/100,'']);
   var ws=XLSX.utils.aoa_to_sheet(rows,{cellDates:true});
-  ws['!cols']=[{wch:16},{wch:36},{wch:12},{wch:10},{wch:10},{wch:16},{wch:12},{wch:18}];
+  ws['!cols']=[{wch:16},{wch:36},{wch:12},{wch:10},{wch:10},{wch:16},{wch:12},{wch:18},{wch:14}];
   var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Aufmaß');
   var safe=String(p.name).replace(/[^\wäöüÄÖÜß\- ]+/g,'').trim().replace(/\s+/g,'_').slice(0,40)||'Projekt';
   var out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellDates:true});
@@ -1021,8 +1097,21 @@ var actions={
   openMat:function(el){sheetMatDetail(el.dataset.id)},
   delivery:function(el){openMatFlow('deliver',null,el.dataset.id)},
   book:function(el){openMatFlow('book',el.dataset.pid)},
-  pickMat:function(el){ui.m.sel=el.dataset.id;ui.m.qty=1;sheetMat()},
-  unpick:function(){ui.m.sel=null;sheetMat()},
+  pickMat:function(el){ui.m.sel=el.dataset.id;ui.m.qty=1;ui.m.loc=null;sheetMat()},
+  unpick:function(){ui.m.sel=null;ui.m.loc=null;sheetMat()},
+  locList:function(el){sheetLocList(el.dataset.v)},
+  transfer:function(el){sheetTransfer(el.dataset.id)},
+  locPick:function(el){
+    var g=el.dataset.g;if(!ui.m)return;ui.m[g]=el.dataset.v;
+    el.parentNode.querySelectorAll('button').forEach(function(b){var on=b===el;b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on))});
+    setErr(g,'');setErr('qty','');
+  },
+  qtyAll:function(){var mt=mat(ui.m.sel);if(mt)$('#qty').value=nf(mt.locs[ui.m.loc]||0,3).replace(/\./g,'')},
+  delTr:function(el){
+    var ids=el.dataset.ids.split(','),k='tr'+ids[0];
+    if(ui.confirm!==k){ui.confirm=k;el.classList.add('arm');toast('Nochmal tippen, um die Umbuchung zu stornieren');setTimeout(function(){if(ui.confirm===k)ui.confirm=null;if(el.isConnected)el.classList.remove('arm')},3000);return}
+    ui.confirm=null;ids.forEach(function(id){mut('stock_moves','del',{id:id})});toast('Umbuchung storniert');keepRender(function(){sheetMatDetail(el.dataset.id)});
+  },
   qtyAdd:function(el){var i=$('#qty');i.value=nf(num('qty')+Number(el.dataset.v),3).replace(/\./g,'')},
   qtyStep:function(el){var i=$('#qty'),n=num('qty')||0;n=Math.max(0,n+Number(el.dataset.v));i.value=nf(n,3).replace(/\./g,'')},
   scan:function(el){sheetScan(el.dataset.next)},
@@ -1063,10 +1152,21 @@ var actions={
 var submits={
   saveTask:submitTask,saveProj:submitProj,saveMat:submitMatNew,
   saveMatEdit:function(f){submitMatEdit(f.dataset.id)},
-  saveBook:submitBook,saveDelivery:submitDelivery,saveHours:submitHours,scanManual:submitScanManual,
+  saveBook:submitBook,saveDelivery:submitDelivery,saveTransfer:submitTransfer,saveHours:submitHours,scanManual:submitScanManual,
   login:doLogin,reset:doReset,setpw:doSetPw
 };
 
+/* Schnelles Doppeltippen auf Buttons soll nicht zoomen (Fallback, falls touch-action nicht greift) */
+(function(){
+  var last=0,moved=false;
+  document.addEventListener('touchstart',function(){moved=false},{passive:true});
+  document.addEventListener('touchmove',function(){moved=true},{passive:true});
+  document.addEventListener('touchend',function(e){
+    var now=Date.now(),b=e.target.closest&&e.target.closest('button,[data-act],.chip');
+    if(b&&!moved&&now-last<450&&!b.disabled){e.preventDefault();b.click()}
+    last=now;
+  },{passive:false});
+})();
 document.addEventListener('click',function(e){
   var el=e.target.closest('[data-act]');if(!el||el.disabled)return;
   var fn=actions[el.dataset.act];if(fn){fn(el)}
