@@ -438,7 +438,7 @@ function renderDetail(keep){
   '<div class="sect" style="border-color:var(--green)"><div class="sec"><span>Aufmaß</span></div>'+
   '<div class="figs"><div><div class="big num">'+nf(hoursTotal(p))+'<span style="font-size:22px"> h</span></div><div class="l">Stunden gesamt</div></div><div><div class="big num">'+p.mat.length+'</div><div class="l">Materialbuchungen</div></div></div>'+
   (arch?'':'<div class="row2"><button class="btn main" data-act="hours" data-pid="'+p.id+'">'+ico.clock.replace('#101514','currentColor')+'Stunden</button><button class="btn" data-act="book" data-pid="'+p.id+'">'+ico.box.replace('#101514','currentColor')+'Material</button></div>')+
-  '<div>'+bkHtml+'</div>'+(bks.length?'<button class="btn wide" data-act="exportAufmass">Aufmaßbuch als Excel</button>':'')+'</div>'+
+  '<div>'+bkHtml+'</div>'+(bks.length?'<button class="btn wide" data-act="exportAufmass">Aufmaß als Excel (zum Drucken)</button>':'')+'</div>'+
   (off&&!arch?'<button class="btn danger wide" data-act="closeProj" data-id="'+p.id+'">Projekt abschließen</button>':'')+
   '</div>';
   var nb=$('.dbody',d);if(nb&&st)nb.scrollTop=st;
@@ -784,7 +784,13 @@ var isIOS=/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='M
 var standalone=(window.matchMedia&&matchMedia('(display-mode: standalone)').matches)||navigator.standalone===true;
 function saveFile(blob,name,type){
   var f=null;try{f=new File([blob],name,{type:type})}catch(e){}
-  if(isIOS&&f&&navigator.canShare&&navigator.canShare({files:[f]})){navigator.share({files:[f]}).catch(function(){});return}
+  if(isIOS&&f&&navigator.canShare&&navigator.canShare({files:[f]})){
+    navigator.share({files:[f]}).catch(function(e){
+      if(e&&e.name==='AbortError')return;
+      /* Safari verlangt manchmal einen frischen Fingertipp – dann eigenen Knopf anbieten */
+      ui.shareFile=f;
+      openSheet('share',sheetShell('Datei ist fertig',name,'<div class="form"><button class="btn main wide" data-act="shareFile">Teilen / In Dateien sichern</button></div>','50%'));
+    });return}
   var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();
   setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},5000);
 }
@@ -979,42 +985,6 @@ async function exportXlsx(){
 }
 
 
-/* Aufmassbuch eines Projekts als Excel */
-async function exportAufmass(pid){
-  var p=proj(pid);if(!p)return;
-  try{await loadScript('vendor/xlsx.full.min.js')}catch(e){toast('Der Excel-Export konnte nicht geladen werden. Bitte einmal online öffnen.');return}
-  var off=isOffice(),dt=function(ms){return ms?new Date(ms):''};
-  var rows=[];
-  rows.push(['AUFMASSBUCH']);
-  rows.push(['Kunde',p.name]);
-  rows.push(['Kundennr.',p.kundennr||'']);
-  rows.push(['Adresse',p.addr||'']);
-  rows.push(['Telefon',p.phone||'']);
-  rows.push(['Stand',new Date()]);
-  rows.push([]);
-  rows.push(['ARBEITSSTUNDEN']);
-  rows.push(['Datum','Stunden','Gebucht von','Notiz']);
-  var hs=p.hours.slice().sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:0});
-  hs.forEach(function(h){rows.push([new Date(h.date+'T12:00'),h.h,person(h.by).name,h.note||''])});
-  rows.push(['Summe Stunden',hoursTotal(p),'','']);
-  rows.push([]);
-  rows.push(['MATERIAL']);
-  rows.push(off?['Datum','Material','QR','Menge','Einheit','Einkaufspreis €','Wert €','Gebucht von','Entnommen aus']:['Datum','Material','QR','Menge','Einheit','Gebucht von','Entnommen aus']);
-  var tot=0,ms=p.mat.slice().sort(function(a,b){return a.at-b.at});
-  ms.forEach(function(b){
-    var m=mat(b.matId)||{name:'',qr:'',unit:'',price:0},val=m.price?Math.round(b.qty*m.price*100)/100:0;tot+=val;
-    rows.push(off?[dt(b.at),m.name,m.qr,b.qty,m.unit,m.price||'',val||'',person(b.by).name,locName(b.loc)]:[dt(b.at),m.name,m.qr,b.qty,m.unit,person(b.by).name,locName(b.loc)]);
-  });
-  if(off)rows.push(['Summe Materialwert','','','','','',Math.round(tot*100)/100,'']);
-  var ws=XLSX.utils.aoa_to_sheet(rows,{cellDates:true});
-  ws['!cols']=[{wch:16},{wch:36},{wch:12},{wch:10},{wch:10},{wch:16},{wch:12},{wch:18},{wch:14}];
-  var wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Aufmaß');
-  var safe=String(p.name).replace(/[^\wäöüÄÖÜß\- ]+/g,'').trim().replace(/\s+/g,'_').slice(0,40)||'Projekt';
-  var out=XLSX.write(wb,{bookType:'xlsx',type:'array',cellDates:true});
-  saveFile(new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),'Aufmass_'+(p.kundennr?p.kundennr+'_':'')+safe+'_'+TODAY()+'.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  toast('Aufmaßbuch erstellt');
-}
-
 /* ---------- Einstellungen, Team ---------- */
 function ago(ms){
   if(!ms)return 'noch nie';
@@ -1028,7 +998,7 @@ function sheetUser(){
   var body='<div class="form" style="gap:16px">'+
     '<div><div class="sec" style="margin-bottom:6px">Abgleich</div><p class="hint" style="font-size:14px;color:var(--ink)">'+(navigator.onLine?'Verbunden':'Kein Empfang')+' · zuletzt abgeglichen '+esc(ago(sync_.last||C.pulledAt))+'<br>'+(n?n+' Einträge warten auf die Übertragung.':'Alles übertragen.')+'</p>'+
     '<button class="btn wide" data-act="syncNow" style="margin-top:8px">Jetzt abgleichen</button></div>'+
-    (off?'<div><div class="sec" style="margin-bottom:8px">Büro</div><div class="form" style="gap:10px"><button class="btn main wide" data-act="export">Excel-Export</button><button class="btn wide" data-act="team">Team verwalten</button></div><p class="hint" style="margin-top:6px">Der Export enthält Projekte, Stunden, Materialbuchungen, Lager, Lieferungen und Aufgaben.</p></div>':'')+
+    (off?'<div><div class="sec" style="margin-bottom:8px">Büro</div><div class="form" style="gap:10px"><button class="btn main wide" data-act="exportMenu">Export &amp; Ausdrucke</button><button class="btn wide" data-act="team">Team verwalten</button></div><p class="hint" style="margin-top:6px">Der Export enthält Projekte, Stunden, Materialbuchungen, Lager, Lieferungen und Aufgaben.</p></div>':'')+
     install+
     '<div><button class="btn '+(ui.confirm==='logout'?'danger':'')+' wide" data-act="logout">'+(ui.confirm==='logout'?(n?'Es warten noch '+n+' Einträge – trotzdem abmelden?':'Wirklich abmelden?'):'Abmelden')+'</button><p class="hint" style="margin-top:8px">Angemeldet als '+esc(ME.name)+' · '+(off?'Büro und Lager':'Monteur')+' · Version '+esc(CFG.version||'1')+'</p></div></div>';
   openSheet('user',sheetShell(ME.name,'Einstellungen',body,'92%'));
@@ -1136,7 +1106,13 @@ var actions={
   },
   syncNow:function(){toast(navigator.onLine?'Abgleich läuft…':'Kein Empfang – es wird übertragen, sobald du wieder online bist');sync()},
   export:function(){exportXlsx()},
-  exportAufmass:function(){exportAufmass(ui.detail)},
+  exportAufmass:function(){exportProjekt(ui.detail)},
+  exportMenu:function(){sheetExport()},
+  shareFile:function(){var f=ui.shareFile;if(!f)return;navigator.share({files:[f]}).then(function(){closeSheet()}).catch(function(){})},
+  expLoc:function(el){ui.exp.loc=el.dataset.v;document.querySelectorAll('#expLocs .chip').forEach(function(b){b.classList.toggle('on',b===el)})},
+  expZero:function(el){ui.exp.zero=!ui.exp.zero;el.classList.toggle('on',ui.exp.zero);el.textContent=(ui.exp.zero?'✓ ':'')+'Auch Material ohne Bestand'},
+  expLager:function(){exportLager(ui.exp.loc,ui.exp.zero)},
+  expProj:function(el){exportProjekt(el.dataset.id)},
   team:sheetTeam,
   setRole:function(el){var p=C.profiles.filter(function(x){return x.id===el.dataset.id})[0];if(p&&p.role!==el.dataset.v){mut('profiles','up',{id:p.id,role:el.dataset.v});keepRender(sheetTeam)}},
   setActive:function(el){var p=C.profiles.filter(function(x){return x.id===el.dataset.id})[0];if(p){mut('profiles','up',{id:p.id,active:el.dataset.v==='1'});keepRender(sheetTeam)}},
@@ -1181,6 +1157,7 @@ document.addEventListener('input',function(e){
   if(kind==='proj'){
     var r=projRows(v,false);$('#flist').innerHTML=r.html;var nr=$('#nores');if(nr)nr.hidden=r.total>0;return;
   }
+  if(kind==='expproj'){$('#elist').innerHTML=expProjRows(v);return}
   if(kind==='tp'){var s=$('#tp');if(s)s.innerHTML=projOptions(v,s.value,60);return}
   var n=0;
   var words=v.split(/\s+/).filter(Boolean);
@@ -1337,4 +1314,173 @@ if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('controllerchange',function(){if(hadCtl&&!ui.sheetKind&&ui.view==='app')location.reload();hadCtl=true});
 }
 boot();
+
+/* ---------- Export-Menü und druckfertige Excel-Dateien ---------- */
+var XL='vendor/exceljs.min.js';
+var XMIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+function expProjRows(q){
+  q=String(q||'').toLowerCase().trim();
+  var words=q.split(/\s+/).filter(Boolean);
+  var last=function(p){var m=0;p.hours.forEach(function(h){if(h.at>m)m=h.at});p.mat.forEach(function(b){if(b.at>m)m=b.at});return m};
+  var list=S.projects.filter(function(p){var s=(p.name+' '+p.addr+' '+p.kundennr).toLowerCase();return words.every(function(w){return s.indexOf(w)>-1})});
+  list=list.map(function(p){return {p:p,l:last(p)}}).sort(function(a,b){return q?a.p.name.localeCompare(b.p.name,'de'):(b.l-a.l)||a.p.name.localeCompare(b.p.name,'de')});
+  var total=list.length;list=list.slice(0,30);
+  if(!total)return '<p class="hint">Kein Projekt gefunden.</p>';
+  return list.map(function(x){
+    var p=x.p,h=hoursTotal(p),n=p.mat.length;
+    return '<button class="item" data-act="expProj" data-id="'+p.id+'"><span class="grow"><span class="t">'+esc(p.name)+(p.status!=='aktiv'?' <span class="tag">Archiv</span>':'')+'</span><span class="s">'+esc((p.kundennr?p.kundennr+' · ':'')+city(p.addr))+'</span></span><span class="r num" style="font-size:14px">'+(h||n?nf(h)+' h · '+n+' Mat.':'leer')+'</span></button>';
+  }).join('')+(total>30?'<p class="hint" style="padding:10px 2px">'+(total-30)+' weitere – Suche eingrenzen.</p>':'');
+}
+function sheetExport(){
+  var e=ui.exp=ui.exp||{loc:'all',zero:false};
+  var locs=[{k:'all',n:'Alle Orte'}].concat(LOCS).map(function(l){return '<button type="button" class="chip'+(e.loc===l.k?' on':'')+'" data-act="expLoc" data-v="'+l.k+'">'+l.n+'</button>'}).join('');
+  var body='<div class="form" style="gap:22px">'+
+    '<div class="form" style="gap:10px"><div class="sec">Lagerliste zum Ausdrucken</div><p class="hint">Welches Material wo liegt und wie viel davon da ist. Pro Lagerort mit Spalte „Gezählt“ für die Inventur.</p>'+
+      '<div class="chips" id="expLocs">'+locs+'</div>'+
+      '<button type="button" class="chip'+(e.zero?' on':'')+'" id="expZero" data-act="expZero" style="align-self:flex-start">'+(e.zero?'✓ ':'')+'Auch Material ohne Bestand</button>'+
+      '<button class="btn main wide" data-act="expLager">Lagerliste erstellen</button></div>'+
+    '<div class="form" style="gap:10px"><div class="sec">Projekt-Aufmaß</div><p class="hint">Stunden und gebuchtes Material eines Projekts – Projekt antippen.</p>'+
+      '<div class="fld"><input id="eq" type="search" data-filter="expproj" placeholder="Name, Ort oder Kundennummer" aria-label="Projekt suchen" autocomplete="off"></div>'+
+      '<div class="list" id="elist">'+expProjRows('')+'</div></div>'+
+    '<div class="form" style="gap:10px"><div class="sec">Gesamtexport</div><p class="hint">Alle Daten in einer Datei (Projekte, Stunden, Material, Lager, Lieferungen, Umbuchungen, Aufgaben) – zum Weiterverarbeiten, nicht zum Drucken.</p>'+
+      '<button class="btn wide" data-act="export">Gesamtexport erstellen</button></div>'+
+    '</div>';
+  openSheet('export',sheetShell('Export & Ausdrucke','Excel-Dateien erstellen',body,'92%'));
+  loadScript(XL).catch(function(){});loadScript('vendor/xlsx.full.min.js').catch(function(){});
+}
+
+/* Hilfen für ExcelJS */
+async function xlBook(){
+  try{await loadScript(XL)}catch(e){toast('Der Excel-Export konnte nicht geladen werden. Bitte einmal online öffnen.');return null}
+  var wb=new ExcelJS.Workbook();wb.creator='strom-macher App';wb.created=new Date();return wb;
+}
+var XB={style:'thin',color:{argb:'FFB4BDBB'}};
+function xlBox(c){c.border={top:XB,left:XB,bottom:XB,right:XB}}
+function xlHeadRow(r){r.height=22;r.eachCell(function(c){c.font={bold:true};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE3ECEA'}};xlBox(c);c.alignment={vertical:'middle',wrapText:true}})}
+function xlBodyRow(r,i,n){r.eachCell({includeEmpty:true},function(c,col){if(col>n)return;xlBox(c);c.alignment=Object.assign({vertical:'top',wrapText:true},c.alignment||{});if(i%2)c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF6F8F7'}}})}
+function xlPage(ws,land,titles){
+  ws.pageSetup={paperSize:9,orientation:land?'landscape':'portrait',fitToPage:true,fitToWidth:1,fitToHeight:0,horizontalCentered:true,
+    margins:{left:0.5,right:0.5,top:0.6,bottom:0.7,header:0.3,footer:0.3}};
+  if(titles)ws.pageSetup.printTitlesRow=titles;
+  ws.headerFooter={oddFooter:'&L&8strom-macher&C&8Seite &P von &N&R&8'+stamp()};
+}
+function stamp(){var d=new Date(),z=function(n){return (n<10?'0':'')+n};return z(d.getDate())+'.'+z(d.getMonth()+1)+'.'+d.getFullYear()+' '+z(d.getHours())+':'+z(d.getMinutes())}
+/* Excel kennt keine Zeitzonen: Ortszeit als „UTC“ ablegen, damit die Uhrzeit stimmt */
+function xd(ms){var d=new Date(ms);return new Date(ms-d.getTimezoneOffset()*60000)}
+function xday(s){return xd(new Date(s+'T12:00').getTime())}
+var NUM='#,##0.###';
+function fileSafe(s){var m={'ä':'ae','ö':'oe','ü':'ue','Ä':'Ae','Ö':'Oe','Ü':'Ue','ß':'ss'};return String(s||'').replace(/[äöüÄÖÜß]/g,function(c){return m[c]}).replace(/[^\w\- ]+/g,'').trim().replace(/\s+/g,'_').slice(0,40)}
+async function xlSave(wb,name){
+  var buf=await wb.xlsx.writeBuffer();
+  saveFile(new Blob([buf],{type:XMIME}),name,XMIME);
+}
+function xlTitle(ws,title,sub){
+  var r=ws.getRow(1);r.getCell(1).value=title;r.getCell(1).font={bold:true,size:16};r.height=24;
+  var r2=ws.getRow(2);r2.getCell(1).value=sub;r2.getCell(1).font={size:10,color:{argb:'FF5C6664'}};
+}
+
+/* Lagerliste */
+async function exportLager(loc,zero){
+  var wb=await xlBook();if(!wb)return;
+  var all=loc==='all';
+  var ms=S.mats.filter(function(m){return zero||(all?m.stock!==0:m.locs[loc]!==0)}).sort(function(a,b){return a.name.localeCompare(b.name,'de')});
+  var ws=wb.addWorksheet(all?'Lagerliste':locName(loc),{views:[{state:'frozen',ySplit:4}]});
+  xlTitle(ws,'Lagerliste – '+(all?'alle Lagerorte':locName(loc)),'strom-macher · Stand '+stamp()+' · '+ms.length+' Materialien');
+  var head,widths;
+  if(all){head=['QR','Material','Einheit'].concat(LOCS.map(function(l){return l.n}),['Gesamt']);widths=[10,52,8,12,10,12,12,10]}
+  else{head=['QR','Material','Einheit','Bestand','Gezählt'];widths=[10,56,8,11,11]}
+  ws.columns=widths.map(function(w){return {width:w}});
+  var hr=ws.getRow(4);hr.values=head;xlHeadRow(hr);
+  for(var c=4;c<=head.length;c++)hr.getCell(c).alignment={horizontal:'right',vertical:'middle',wrapText:true};
+  ms.forEach(function(m,i){
+    var vals=all?[m.qr,m.name,m.unit].concat(LOCK.map(function(k){return m.locs[k]||null}),[m.stock]):[m.qr,m.name,m.unit,m.locs[loc],null];
+    var r=ws.getRow(5+i);r.values=vals;
+    for(var c=4;c<=head.length;c++)r.getCell(c).numFmt=NUM;
+    if(all)r.getCell(head.length).font={bold:true};
+    xlBodyRow(r,i,head.length);
+  });
+  if(!ms.length){ws.getCell('A5').value=zero?'Noch kein Material angelegt.':'An diesem Ort ist derzeit kein Material mit Bestand.'}
+  xlPage(ws,all,'4:4');
+  await xlSave(wb,'Lagerliste_'+(all?'alle_Orte':fileSafe(locName(loc)))+'_'+TODAY()+'.xlsx');
+  toast('Lagerliste erstellt');
+}
+
+/* Projekt-Aufmaß zum Ausdrucken */
+async function exportProjekt(pid){
+  var p=proj(pid);if(!p)return;
+  var wb=await xlBook();if(!wb)return;
+  var off=isOffice();
+  var ws=wb.addWorksheet('Aufmaß');
+  ws.columns=[{width:13},{width:40},{width:11},{width:10},{width:24}];
+  xlTitle(ws,'Aufmaß','strom-macher · Elektrotechnik & Photovoltaik');
+  var row=4;
+  function kv(k,v){var r=ws.getRow(row++);r.getCell(1).value=k;r.getCell(1).font={color:{argb:'FF5C6664'}};r.getCell(2).value=v||'';ws.mergeCells(r.number,2,r.number,5);r.getCell(2).alignment={wrapText:true,vertical:'top'};return r}
+  kv('Kunde',p.name).getCell(2).font={bold:true,size:12};
+  if(p.kundennr)kv('Kundennr.',p.kundennr);
+  kv('Adresse',p.addr);
+  if(p.phone)kv('Telefon',p.phone+(p.phone2?' · '+p.phone2:''));
+  kv('Stand',stamp());
+  row++;
+  function section(t){var r=ws.getRow(row++);r.getCell(1).value=t;r.getCell(1).font={bold:true,size:12};r.height=20}
+  function head(vals,merge){var r=ws.getRow(row++);r.values=vals;if(merge)ws.mergeCells(r.number,4,r.number,5);xlHeadRow(r);return r}
+
+  /* Stunden */
+  section('Arbeitsstunden');
+  var hr=head(['Datum','Erfasst von','Stunden','Notiz'],true);hr.getCell(3).alignment={horizontal:'right',vertical:'middle'};hr.getCell(4).alignment={vertical:'middle',indent:1};
+  var hs=p.hours.slice().sort(function(a,b){return a.date<b.date?-1:a.date>b.date?1:a.at-b.at});
+  var per={};
+  hs.forEach(function(h,i){
+    var nm=person(h.by).name||'';per[nm]=(per[nm]||0)+h.h;
+    var r=ws.getRow(row++);r.values=[xday(h.date),nm,h.h,h.note||''];ws.mergeCells(r.number,4,r.number,5);
+    r.getCell(1).numFmt='dd.mm.yyyy';r.getCell(3).numFmt=NUM;xlBodyRow(r,i,5);r.getCell(4).alignment={vertical:'top',wrapText:true,indent:1};
+  });
+  if(!hs.length){var r0=ws.getRow(row++);r0.getCell(1).value='Keine Stunden erfasst.';}
+  var sr=ws.getRow(row++);sr.getCell(1).value='Summe Stunden';sr.getCell(3).value=Math.round(hoursTotal(p)*100)/100;sr.getCell(3).numFmt=NUM;
+  [1,2,3].forEach(function(c){sr.getCell(c).font={bold:true};sr.getCell(c).border={top:{style:'medium'}}});
+  var names=Object.keys(per);
+  if(names.length>1){
+    row++;var r1=ws.getRow(row++);r1.getCell(1).value='davon erfasst von';r1.getCell(1).font={color:{argb:'FF5C6664'}};
+    names.sort().forEach(function(n){var r=ws.getRow(row++);r.getCell(2).value=n;r.getCell(3).value=Math.round(per[n]*100)/100;r.getCell(3).numFmt=NUM});
+  }
+  row++;
+
+  /* Material, je Material zusammengefasst */
+  section('Material');
+  var mh=head(['QR','Material','Menge','Einheit']);mh.getCell(3).alignment={horizontal:'right',vertical:'middle'};mh.getCell(4).alignment={vertical:'middle',indent:1};
+  var agg={};
+  p.mat.forEach(function(b){agg[b.matId]=(agg[b.matId]||0)+b.qty});
+  var ids=Object.keys(agg).filter(function(id){return Math.abs(agg[id])>1e-9}).sort(function(a,b){return ((mat(a)||{}).name||'').localeCompare(((mat(b)||{}).name||''),'de')});
+  ids.forEach(function(id,i){
+    var m=mat(id)||{name:'(gelöschtes Material)',qr:'',unit:''};
+    var r=ws.getRow(row++);r.values=[m.qr,m.name,Math.round(agg[id]*1000)/1000,m.unit];r.getCell(3).numFmt=NUM;xlBodyRow(r,i,4);r.getCell(4).alignment={vertical:'top',indent:1};
+  });
+  if(!ids.length){var r2=ws.getRow(row++);r2.getCell(1).value='Kein Material gebucht.';}
+
+  /* Unterschriften */
+  row+=3;
+  var ur=ws.getRow(row);
+  [1,2].forEach(function(c){ur.getCell(c).border={top:{style:'thin'}}});[4,5].forEach(function(c){ur.getCell(c).border={top:{style:'thin'}}});
+  ur.getCell(1).value='Datum, Unterschrift Kunde';ur.getCell(4).value='Datum, Unterschrift strom-macher';
+  ur.getCell(1).font=ur.getCell(4).font={size:9,color:{argb:'FF5C6664'}};
+  xlPage(ws,false,null);
+
+  /* Blatt 2: einzelne Materialbuchungen (zum Nachschauen, nicht zum Drucken) */
+  var w2=wb.addWorksheet('Materialbuchungen',{views:[{state:'frozen',ySplit:1}]});
+  var h2=['Datum','Material','QR','Menge','Einheit','Entnommen aus','Gebucht von'].concat(off?['Einkaufspreis €','Wert €']:[]);
+  w2.columns=[16,40,10,9,8,14,18,14,10].slice(0,h2.length).map(function(w){return {width:w}});
+  var r2h=w2.getRow(1);r2h.values=h2;xlHeadRow(r2h);
+  p.mat.slice().sort(function(a,b){return a.at-b.at}).forEach(function(b,i){
+    var m=mat(b.matId)||{name:'',qr:'',unit:'',price:0};
+    var vals=[xd(b.at),m.name,m.qr,b.qty,m.unit,locName(b.loc),person(b.by).name||''];
+    if(off)vals.push(m.price||null,m.price?Math.round(b.qty*m.price*100)/100:null);
+    var r=w2.getRow(2+i);r.values=vals;r.getCell(1).numFmt='dd.mm.yyyy hh:mm';r.getCell(4).numFmt=NUM;
+    if(off){r.getCell(8).numFmt='#,##0.00';r.getCell(9).numFmt='#,##0.00'}
+    xlBodyRow(r,i,h2.length);
+  });
+  xlPage(w2,true,'1:1');
+
+  await xlSave(wb,'Aufmass_'+(p.kundennr?p.kundennr+'_':'')+(fileSafe(p.name)||'Projekt')+'_'+TODAY()+'.xlsx');
+  toast('Aufmaß erstellt');
+}
 })();
