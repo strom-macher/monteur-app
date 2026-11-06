@@ -1,5 +1,5 @@
 /* strom-macher Service Worker: App-Dateien offline verfügbar halten */
-var V='sm-v6';
+var V='sm-v7';
 var SHELL=['./','index.html','app.css','app.js','config.js','manifest.webmanifest',
   'vendor/supabase.js','vendor/qrcode.js','vendor/html5-qrcode.min.js','vendor/xlsx.full.min.js','vendor/exceljs.min.js',
   'vendor/d3.min.js','vendor/topojson-client.min.js','vendor/leadmap-geo.js','vendor/html-to-image.min.js',

@@ -262,13 +262,15 @@ var ico={
   cam:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><path d="M4 8h3l1.6-2.5h6.8L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.6"/></svg>',
   img:'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 18l5-5 4 4 3-3 4 4"/></svg>',
   pin:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.4"/></svg>',
+  mail:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2"/><path d="M3.5 7l8.5 6 8.5-6"/></svg>',
+  nav:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><path d="M20.5 3.5L3.5 10.5l7 2.5 2.5 7z"/></svg>',
   tel:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linejoin="round"><path d="M6.5 3.5h3l1.5 4-2 1.5a11 11 0 005.5 5.5l1.5-2 4 1.5v3a2 2 0 01-2 2A15.5 15.5 0 014.5 5.5a2 2 0 012-2z"/></svg>',
   clock:'<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#101514" stroke-width="2.3" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   box:'<svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#101514" stroke-width="2.3" stroke-linejoin="round"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg>',
   bolt:'<svg width="20" height="20" viewBox="0 0 24 24" fill="#101514"><path d="M13 2L5 13.5h5.5L9.5 22 19 9.5h-5.8z"/></svg>'
 };
 /* ---------- Oberfläche ---------- */
-var ui={tab:'start',lead:null,detail:null,sheet:null,pend:{},tm:'active',tf:'all',m:null,h:{val:0},scanNext:null,confirm:null,sheetKind:'',curMat:null};
+var ui={seen:{},tab:'start',lead:null,detail:null,sheet:null,pend:{},tm:'active',tf:'all',m:null,h:{val:0},scanNext:null,confirm:null,sheetKind:'',curMat:null};
 var PH_URL={};   /* lokale Fotos, die noch nicht hochgeladen sind */
 var SU={};       /* signierte Foto-Adressen */
 
@@ -334,7 +336,7 @@ function tabAufgaben(){
   var act=S.tasks.filter(function(t){return !t.done}).sort(function(a,b){return b.created-a.created});
   var five=act.slice(0,5);
   var rows=five.length?five.map(function(t){return taskRow(t,{who:true})}).join(''):'<div class="empty"><b>Alles erledigt</b>Mit + legst du eine neue Aufgabe an.</div>';
-  var more=act.length>5?'<p class="hint" style="text-align:center">'+(act.length-5)+' weitere aktive Aufgaben hinter den drei Punkten</p>':'';
+  var nm=act.length-5,more=nm>0?'<p class="hint" style="text-align:center">'+nm+(nm===1?' weitere aktive Aufgabe':' weitere aktive Aufgaben')+' hinter den drei Punkten</p>':'';
   return '<div class="titlebar rise" style="--i:0"><div class="pill">Aufgaben</div><button class="plus" data-act="addTask" aria-label="Neue Aufgabe">+</button></div>'+
     '<div class="body"><div class="panel rise" style="--i:1">'+rows+'<button class="dots" data-act="allTasks" aria-label="Alle aktiven Aufgaben anzeigen"><span></span><span></span><span></span></button></div>'+more+'</div>';
 }
@@ -416,7 +418,7 @@ function hoursTotal(p){return p.hours.reduce(function(s,x){return s+x.h},0)}
 function canStorno(by){return isOffice()||by===ME.id}
 function renderDetail(keep){
   if(ui.lead){renderLead(keep);return}
-  var d=$('#detail'),p=proj(ui.detail);d.classList.remove('ldet');
+  var d=$('#detail'),p=proj(ui.detail);d.classList.remove('ldet');d.classList.remove('flip');
   if(!p){d.hidden=true;d.innerHTML='';return}
   var old=$('.dbody',d),st=keep&&old?old.scrollTop:0;
   var arch=p.status!=='aktiv',off=isOffice();
@@ -1031,7 +1033,7 @@ function sheetTeam(){
 function setTab(t){
   if(ui.detail||ui.lead){ui.detail=null;ui.lead=null;renderDetail()}
   if(ui.sheetKind)closeSheet();
-  ui.tab=t;renderHeader();renderTab(true);
+  ui.tab=t;renderHeader();var first=!ui.seen[t];ui.seen[t]=true;renderTab(first);
 }
 function checkTask(id,btn){
   var row=btn.closest('.task');
@@ -1065,7 +1067,7 @@ var actions={
     var wasSheet=ui.sheetKind;if(wasSheet)closeSheet();
     ui.lead=null;ui.detail=el.dataset.id;renderDetail();
   },
-  closeDetail:function(){ui.detail=null;ui.lead=null;ui.confirm=null;renderDetail();refresh()},
+  closeDetail:function(){closeDetailAnimated()},
   newProj:function(){sheetProjForm(null)},
   editProj:function(){var p=proj(ui.detail);if(p)sheetProjForm(p)},
   projArchive:function(){sheetProjList('archive')},
@@ -1273,7 +1275,7 @@ function route(){
 }
 function showApp(){
   ui.view='app';$('#auth').hidden=true;build();
-  if(!ui.started){ui.started=true;ui.tab='start'}
+  if(!ui.started){ui.started=true;ui.tab='start';ui.seen={start:true}}
   renderHeader();renderTab(true);renderBubbles();
   remind();
 }
@@ -1342,6 +1344,7 @@ function kmFrom(lat,lon){
 }
 var XSVG='<svg class="lx" viewBox="0 0 64 48" preserveAspectRatio="none" aria-hidden="true"><g stroke-linecap="round"><line x1="6" y1="6" x2="58" y2="42" stroke="#fff" stroke-width="7"/><line x1="58" y1="6" x2="6" y2="42" stroke="#fff" stroke-width="7"/><line x1="6" y1="6" x2="58" y2="42" stroke="#E5483A" stroke-width="4"/><line x1="58" y1="6" x2="6" y2="42" stroke="#E5483A" stroke-width="4"/></g></svg>';
 
+function RM(){return !!(window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches)}
 /* Startauswahl */
 function tabStart(){
   var hr=new Date().getHours(),g=hr<11?'Guten Morgen':hr<18?'Guten Tag':'Guten Abend';
@@ -1353,7 +1356,7 @@ function tabStart(){
     '<h1 class="rise" style="--i:1">strom-macher</h1><p class="hi rise" style="--i:1">'+g+', '+esc(first(ME.name))+'</p>'+
     '<div class="hbtns">'+
     '<button class="hbtn vbtn rise" style="--i:2" data-act="tab" data-tab="vertrieb"><span>Vertrieb<em>Leads · Karte · Termine</em></span><small>'+open+(open===1?' Rückruf offen':' Rückrufe offen')+'<br>'+soon+(soon===1?' Termin':' Termine')+' in 7 Tagen</small></button>'+
-    '<button class="hbtn bbtn rise" style="--i:3" data-act="tab" data-tab="home"><span>Betrieb<em>Aufgaben · Lager · Projekte</em></span><small>'+tasks+' Aufgaben offen<br>'+heute+(heute===1?' Termin heute':' Termine heute')+'</small></button>'+
+    '<button class="hbtn bbtn rise" style="--i:3" data-act="tab" data-tab="aufgaben"><span><i class="sq3" aria-hidden="true"><b></b><b></b><b></b></i>Betrieb<em>Aufgaben · Lager · Projekte</em></span><small>'+tasks+' Aufgaben offen<br>'+heute+(heute===1?' Termin heute':' Termine heute')+'</small></button>'+
     '</div></div>';
 }
 
@@ -1379,13 +1382,12 @@ function tabVertrieb(){
   var grad='linear-gradient(to right,'+[0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1].map(function(f){return prism(f*max,max)}).join(',')+')';
   return '<div class="titlebar rise" style="--i:0"><div class="pill">Vertrieb</div><button class="plus" data-act="leadNew" aria-label="Neuer Lead">+</button></div>'+
     '<div class="body" id="vbody"><div id="vcap" class="vcap">'+
-    '<div class="vtools noshot"><button class="chip" data-act="vPrism">'+(vui.prism?'Prismafarben aus':'Prismafarben an')+'</button><button class="chip" data-act="vReset">Ansicht zurücksetzen</button><button class="chip" data-act="vSnap">Snapshot</button></div>'+
+    '<div class="vtools noshot"><button class="chip" data-act="vPrism">'+(vui.prism?'Prismafarben aus':'Prismafarben an')+'</button><button class="chip" data-act="vReset" id="vreset"'+(vui.zoom&&vui.zoom.k!==1||vui.zoom&&(vui.zoom.x||vui.zoom.y)?'':' hidden')+'>Ansicht zurücksetzen</button><button class="chip" data-act="vSnap">Snapshot</button></div>'+
     '<div class="vshot-h" hidden><b>PV-Lead-Karte</b> · Stand '+esc(fmtStamp(Date.now()))+'</div>'+
     '<div class="vmap" id="vmap" aria-label="Karte Niederösterreich und Wien mit Lead-Fähnchen"><p class="hint vml">Karte wird geladen…</p></div>'+
     '<div class="vleg"><span class="lg">0 kWp <i class="grad" style="background:'+grad+'"></i> '+esc(fmtK(max))+' kWp</span><span class="lg"><i class="sq" style="background:#888780"></i>unbekannt</span>'+
     '<span class="lg"><i class="sq o" style="border-color:var(--yellow)"></i>nicht erreicht</span><span class="lg"><i class="sq o" style="border-color:var(--blue)"></i>eingeplant</span>'+
     '<span class="lg"><i class="ln" style="background:#E8A33D"></i>Autobahn</span><span class="lg"><i class="ln d"></i>Bahn</span><span class="lg"><i class="ln" style="background:#3B82C4"></i>Flüsse</span></div>'+
-    '<p class="hint">Auf der Karte: Rückruf offen, nicht erreicht, eingeplant. Zoomen mit zwei Fingern oder Mausrad, Fähnchen antippen öffnet den Lead.</p>'+
     groups+'</div></div>';
 }
 function vSig(){return JSON.stringify([vui.prism,vui.arch,(C.leads||[]).length,C.leads,(C.lead_log||[]).length])}
@@ -1409,7 +1411,12 @@ function drawMap(el,opts){
   var onMap=L.filter(function(l){return ['offen','nicht_erreicht','einplanen'].indexOf(l.st)>-1||(sel&&l.id===sel.id)});
   var svg=d3.select(el).append('svg').attr('viewBox','0 0 '+W+' '+H).attr('preserveAspectRatio','xMidYMid slice').attr('role','img').attr('aria-label','Karte mit '+onMap.length+' Leads');
   var pts=[[15.18,47.68],[16.62,48.24]].concat(L.map(function(l){return [l.lon,l.lat]}));
-  var pj=d3.geoMercator().fitExtent(detail?[[14,14],[W-14,H-14]]:[[14,40],[W-14,H-14]],{type:'MultiPoint',coordinates:pts});
+  var pj=detail?d3.geoMercator().fitExtent([[14,14],[W-14,H-14]],{type:'MultiPoint',coordinates:pts})
+    :d3.geoMercator().fitExtent([[14,30],[W-14,H-14]],{type:'MultiPoint',coordinates:[[15.98,47.93],[16.55,48.29]]});
+  /* Grenzen aller Leads in Kartenkoordinaten: so weit darf man herauszoomen und verschieben */
+  var bx=pts.map(function(c){return pj(c)}),bx0=Math.min(0,d3.min(bx,function(p){return p[0]})-60),by0=Math.min(0,d3.min(bx,function(p){return p[1]})-60),
+      bx1=Math.max(W,d3.max(bx,function(p){return p[0]})+60),by1=Math.max(H,d3.max(bx,function(p){return p[1]})+60),
+      kMin=detail?1:Math.max(0.2,Math.min(1,W/(bx1-bx0),H/(by1-by0)));
   var path=d3.geoPath(pj),line=d3.line().x(function(p){return pj(p)[0]}).y(function(p){return pj(p)[1]});
   var root=svg.append('g'),gLand=root.append('g'),gNet=root.append('g'),gTown=root.append('g'),gF=root.append('g');
   var feats=topojson.feature(GEO.AT,GEO.AT.objects.aut).features;
@@ -1444,9 +1451,9 @@ function drawMap(el,opts){
   /* Fähnchen in Bildschirmgröße denken: am Handy wird die 1000er-Karte stark verkleinert, darum größer zeichnen.
      Beim Hineinzoomen wachsen sie sichtbar mit (Bildschirmgröße steigt mit k^0,65), aber langsamer als die Karte. */
   function fscale(){var w=el.clientWidth||1000;return Math.max(1,Math.min(2.6,(1000/w)*0.85))}
-  function fs(k){return fscale()/Math.pow(k,0.35)}
+  function fs(k){return fscale()/Math.pow(Math.max(k,1),0.35)}
   function place(k){
-    var s=fs(k),ts=Math.max(1,fscale()*0.8)/Math.pow(k,0.6);
+    var s=fs(k),ts=Math.max(1,fscale()*0.8)/Math.pow(Math.max(k,1),0.6);
     fl.attr('transform',function(d){var p=pj([d.lon,d.lat]);return 'translate('+p[0]+','+p[1]+') scale('+(sel&&d.id===sel.id?s*1.3:s)+')'});
     tw.selectAll('text,circle').attr('transform','scale('+ts+')');sg.attr('transform','translate('+sp[0]+','+sp[1]+') scale('+ts+')');
   }
@@ -1460,14 +1467,27 @@ function drawMap(el,opts){
     if(best&&bd<=24)openLead(best.id);
   });
   /* Alle Finger an d3 geben (sonst fehlt beim Zwei-Finger-Zoom der erste Finger); iOS-Seitenzoom auf der Karte unterbinden */
-  var zoom=d3.zoom().scaleExtent([1,14]).translateExtent([[-W*0.1,-H*0.1],[W*1.1,H*1.1]])
-    .on('zoom',function(e){k0=e.transform.k;if(!detail)vui.zoom=e.transform;root.attr('transform',e.transform);place(k0)});
+  var zoom=d3.zoom().scaleExtent([kMin,14]).translateExtent(detail?[[-W*0.1,-H*0.1],[W*1.1,H*1.1]]:[[bx0,by0],[bx1,by1]])
+    .on('zoom',function(e){k0=e.transform.k;root.attr('transform',e.transform);place(k0);
+      if(!detail){var t=e.transform,moved=Math.abs(t.k-1)>.01||Math.abs(t.x)>2||Math.abs(t.y)>2;vui.zoom=moved?t:null;var rb=$('#vreset');if(rb)rb.hidden=!moved}});
   svg.call(zoom).on('dblclick.zoom',null);
   el.style.touchAction='none';
   ['gesturestart','gesturechange','gestureend'].forEach(function(ev){el.addEventListener(ev,function(x){x.preventDefault()},{passive:false})});
+  function focusT(l){var p=pj([l.lon,l.lat]),k=Math.max(4,k0);return d3.zoomIdentity.translate(W/2-k*p[0],H*0.7-k*p[1]).scale(k)}
+  if(detail){
+    /* Lead im Streifen wechseln: Karte bleibt stehen und fährt zum neuen Fähnchen */
+    el._go=function(id){
+      var nl=lead(id);if(!nl)return false;
+      if(!fl.filter(function(d){return d.id===id}).size())return false;
+      sel=nl;
+      fl.classed('sel',function(d){return d.id===id}).classed('dim',function(d){return d.id!==id});
+      fl.filter(function(d){return d.id===id}).raise();place(k0);
+      if(nl.lat!=null)svg.interrupt().transition().duration(RM()?0:350).ease(d3.easeCubicOut).call(zoom.transform,focusT(nl));
+      return true;
+    };
+  }
   if(detail&&sel&&sel.lat!=null){
-    var p=pj([sel.lon,sel.lat]),k=4;
-    svg.call(zoom.transform,d3.zoomIdentity.translate(W/2-k*p[0],H*0.7-k*p[1]).scale(k));
+    svg.call(zoom.transform,focusT(sel));
   }else if(!detail&&vui.zoom)svg.call(zoom.transform,vui.zoom);
   else place(1);
   if(!detail)vui.resetZoom=function(){svg.transition().duration(350).call(zoom.transform,d3.zoomIdentity)};
@@ -1496,12 +1516,17 @@ function renderLead(keep){
   var kNote=l.kOv!=null?'angepasst · Vorschlag war '+esc(fmtK(l.kEst))+' kWp <button class="lnk" data-act="leadKwpReset">Zurück auf Vorschlag</button>':(l.kb?'Schätzung: '+esc(l.kb):'');
   var srcOpts=VSRC.map(function(x){return '<option value="'+x[0]+'"'+(l.src===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+(VSRC.some(function(x){return x[0]===l.src})?'':'<option value="'+esc(l.src)+'" selected>'+esc(l.src)+'</option>');
   var mapSig=l.id+'|'+l.st+'|'+l.k+'|'+vui.prism+'|'+l.lat+'|'+l.lon+'|'+(C.leads||[]).length,om=$('#vmapd'),keepMap=om&&om.dataset.sig===mapSig?om:null;
+  var mbase=vui.prism+'|'+(C.leads||[]).length;
+  if(!keepMap&&om&&om._go&&om.dataset.lid!==l.id&&om.dataset.base===mbase&&om._go(l.id)){keepMap=om;om.dataset.sig=mapSig;om.dataset.lid=l.id}
   if(keepMap)keepMap.parentNode.removeChild(keepMap);
   d.hidden=false;d.classList.add('ldet');
   d.innerHTML='<div class="dmap" id="vmapd-slot"></div><div class="dhead"><button class="x" data-act="closeDetail" aria-label="Zurück zur Übersicht">'+ico.back+'</button><h1>'+esc(l.name)+'</h1></div>'+
   '<div class="dbody">'+
   '<div class="lhead"><span class="lsw big s-'+s+'" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(fmtK(l.k))+'</b><small>kWp</small>'+XSVG+'</span>'+
   '<div class="grow"><div class="lst"><span class="vpill s-'+s+'">'+VST[s]+'</span><span class="tag">'+esc(srcLabel(l.src))+'</span></div><div class="hint">'+(l.stAt?'Status gesetzt am '+esc(fmtStamp(l.stAt)):'Noch kein Status gesetzt')+'</div></div></div>'+
+  '<div class="qrow">'+(telh?'<a class="qb" href="tel:'+esc(telh)+'">'+ico.tel+'Anrufen</a>':'')+
+    ((l.addr||l.ort)?'<a class="qb" href="https://www.google.com/maps/dir/?api=1&amp;destination='+q+'" target="_blank" rel="noopener">'+ico.nav+'Navigation</a>':'')+
+    (l.email?'<a class="qb" href="mailto:'+esc(l.email)+'">'+ico.mail+'E-Mail</a>':'')+'</div>'+
   '<div class="sect"><div class="sec"><span>Status</span></div><div class="vacts">'+acts+'</div><p class="hint">Nochmal tippen setzt zurück auf „Rückruf offen“.</p>'+term+'</div>'+
   '<div class="contact">'+
   '<div class="crow"><span style="color:var(--ink2)">'+ico.tel+'</span><div class="grow"><span class="k">Telefon</span><span class="v num">'+esc(l.phone||'nicht erfasst')+'</span></div>'+(telh?'<a href="tel:'+esc(telh)+'">Anrufen</a>':'')+'</div>'+
@@ -1522,7 +1547,7 @@ function renderLead(keep){
   var nb=$('.dbody',d);if(nb&&st)nb.scrollTop=st;
   var slot=$('#vmapd-slot');
   if(keepMap)slot.parentNode.replaceChild(keepMap,slot);
-  else{slot.id='vmapd';slot.dataset.sig=mapSig;slot.innerHTML='<p class="hint vml">Karte wird geladen…</p>';
+  else{slot.id='vmapd';slot.dataset.sig=mapSig;slot.dataset.lid=l.id;slot.dataset.base=mbase;slot.innerHTML='<p class="hint vml">Karte wird geladen…</p>';
     loadMapLibs().then(function(){if(slot.isConnected)drawMap(slot,{sel:l.id})}).catch(function(){slot.innerHTML='<p class="hint vml">Karte offline nicht verfügbar.</p>'})}
   var ta=$('#lnote');if(ta)ta.addEventListener('input',function(){var x=$('#lnote-st');if(x)x.textContent='Ungespeicherte Änderung – wird beim Verlassen des Feldes gespeichert'});
 }
@@ -1531,7 +1556,46 @@ function histHtml(l){
   var src=l.hist.length?'<li class="hsep">aus '+esc(srcLabel(l.src))+':</li>'+l.hist.map(function(x){return '<li class="hsrc">'+esc(x)+'</li>'}).join(''):'';
   return own+src||'<li class="hint">Noch kein Verlauf.</li>';
 }
-function openLead(id){if(ui.sheetKind)closeSheet();ui.confirm=null;ui.lead=id;ui.detail=null;renderLead();var b=$('#detail .dbody');if(b)b.scrollTop=0}
+/* Übergänge: Karte gleitet aus der Übersicht in den Streifen und zurück (nur transform/opacity) */
+var EASE_D='cubic-bezier(0.32,0.72,0,1)';
+function visRect(el){
+  if(!el)return null;var r=el.getBoundingClientRect(),m=$('#main').getBoundingClientRect();
+  var vis=Math.min(r.bottom,m.bottom)-Math.max(r.top,m.top);return r.width&&vis>r.height*0.5?r:null;
+}
+function flipT(a,b){return 'translate('+(a.left-b.left)+'px,'+(a.top-b.top)+'px) scale('+(a.width/b.width)+','+(a.height/b.height)+')'}
+function flipIn(from){
+  var d=$('#detail'),dm=$('#vmapd',d);if(!dm)return;var to=dm.getBoundingClientRect();if(!to.width)return;
+  dm.animate([{transformOrigin:'0 0',transform:flipT(from,to)},{transformOrigin:'0 0',transform:'none'}],{duration:260,easing:EASE_D});
+  [$('.dhead',d),$('.dbody',d)].forEach(function(x){if(x)x.animate([{opacity:0,transform:'translateY(12px)'},{opacity:1,transform:'none'}],{duration:220,delay:70,easing:EASE_D,fill:'backwards'})});
+}
+function openLead(id){
+  if(ui.sheetKind)closeSheet();ui.confirm=null;
+  var d=$('#detail'),from=(!ui.lead&&!ui.detail&&ui.tab==='vertrieb'&&!RM()&&d.animate)?visRect($('#vmap')):null;
+  d.classList.toggle('flip',!!from);
+  ui.lead=id;ui.detail=null;renderLead();var b=$('#detail .dbody');if(b)b.scrollTop=0;
+  if(from)flipIn(from);
+}
+function closeDetailAnimated(){
+  var d=$('#detail'),wasLead=!!ui.lead;
+  ui.confirm=null;ui.detail=null;ui.lead=null;
+  if(d.hidden||RM()||!d.animate){renderDetail();refresh();return}
+  var to=wasLead&&ui.tab==='vertrieb'?visRect($('#vmap')):null,dm=$('#vmapd',d),an=[],dur=200;
+  d.style.pointerEvents='none';
+  if(to&&dm){
+    dur=250;var fr=dm.getBoundingClientRect();
+    an.push(dm.animate([{transformOrigin:'0 0',transform:'none'},{transformOrigin:'0 0',transform:flipT(to,fr)}],{duration:dur,easing:EASE_D,fill:'forwards'}));
+    an.push(d.animate([{backgroundColor:getComputedStyle(d).backgroundColor},{backgroundColor:'rgba(0,0,0,0)'}],{duration:dur,easing:'ease-out',fill:'forwards'}));
+    [$('.dhead',d),$('.dbody',d)].forEach(function(x){if(x)an.push(x.animate([{opacity:1,transform:'none'},{opacity:0,transform:'translateY(12px)'}],{duration:160,easing:'ease-in',fill:'forwards'}))});
+  }else{
+    an.push(d.animate([{opacity:1,transform:'none'},{opacity:0,transform:'translateX(60%)'}],{duration:dur,easing:'cubic-bezier(0.4,0,1,1)',fill:'forwards'}));
+  }
+  setTimeout(function(){
+    d.style.pointerEvents='';
+    if(!ui.detail&&!ui.lead){renderDetail();an.forEach(function(a){try{a.cancel()}catch(e){}})}
+    else an.forEach(function(a){try{a.cancel()}catch(e){}});
+    refresh();
+  },dur+10);
+}
 function logLead(id,text){mut('lead_log','up',{id:uuid(),lead_id:id,text:text,at:new Date().toISOString(),created_by:ME.id,by_name:null})}
 function setLeadStatus(id,s){
   var l=lead(id);if(!l)return;
