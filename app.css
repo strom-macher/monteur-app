@@ -369,6 +369,7 @@ button.ph{padding:0;cursor:pointer;display:block}
 .vmap .town{font:400 11px var(--f-body);fill:var(--ink2)}
 .vmap .town.big{font-weight:600;fill:var(--ink)}
 .vmap .flag{cursor:pointer}
+.vmap .fhit{fill:transparent;stroke:none}
 .vmap .flag:focus{outline:none}
 .vmap .flag:focus-visible .fr{stroke:var(--ink);stroke-width:3}
 .vmap .fp{fill:var(--ink)}

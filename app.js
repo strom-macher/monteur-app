@@ -1424,6 +1424,7 @@ function drawMap(el){
   sg.append('rect').attr('x',-6).attr('y',-6).attr('width',12).attr('height',12).attr('class','hq');sg.append('text').attr('class','town big').attr('x',9).attr('y',-6).text('Start');
   var fl=gF.selectAll('g.flag').data(onMap.slice().sort(function(a,b){return b.lat-a.lat})).join(function(en){
     var g=en.append('g').attr('class','flag').attr('tabindex',0).attr('role','button');
+    g.append('rect').attr('class','fhit').attr('x',-10).attr('y',-44).attr('height',54).attr('rx',8);
     g.append('circle').attr('r',3).attr('class','fp');g.append('line').attr('y2',-32).attr('class','fs');
     g.append('rect').attr('x',1).attr('y',-32).attr('height',18).attr('rx',2).attr('class','fr');
     g.append('text').attr('class','kt').attr('x',6).attr('y',-19);return g});
@@ -1432,13 +1433,29 @@ function drawMap(el){
   fl.select('text.kt').text(function(d){return fmtK(d.k)});
   fl.select('.fr').attr('fill',function(d){return leadColor(d,max)}).attr('class',function(d){return 'fr s-'+d.st});
   fl.each(function(d){
-    var g=d3.select(this),w=g.select('text.kt').node().getComputedTextLength()+11;g.select('rect').attr('width',w);
+    var g=d3.select(this),w=g.select('text.kt').node().getComputedTextLength()+11;d._w=w;g.select('rect.fr').attr('width',w);g.select('rect.fhit').attr('width',w+20);
     var right=pj([d.lon,d.lat])[0]>W-90,dx=right?-4:w+4,dt=g.append('text').attr('class','dist').attr('text-anchor',right?'end':'start');
     if(d.km!=null){dt.append('tspan').attr('x',dx).attr('y',-24).text((d.km<10?d.km.toFixed(1).replace('.',','):Math.round(d.km))+' km');dt.append('tspan').attr('x',dx).attr('y',-15).text(fmtMin(d.min||0))}
   });
   var k0=1;
-  function place(k){fl.attr('transform',function(d){var p=pj([d.lon,d.lat]);return 'translate('+p[0]+','+p[1]+') scale('+(1/k)+')'});tw.selectAll('text,circle').attr('transform','scale('+(1/k)+')');sg.attr('transform','translate('+sp[0]+','+sp[1]+') scale('+(1/k)+')')}
-  var zoom=d3.zoom().scaleExtent([1,8]).translateExtent([[0,0],[W,H]])
+  /* Fähnchen in Bildschirm-Größe denken: am Handy wird die 1000er-Karte stark verkleinert, darum größer zeichnen.
+     Beim Hineinzoomen wachsen sie mit der Wurzel des Zoomfaktors – größer, aber langsamer als die Karte. */
+  function fscale(){var cw=el.clientWidth||1000;return Math.max(1,Math.min(2.6,(1000/cw)*0.85))}
+  function place(k){
+    var f=fscale(),s=f/Math.sqrt(k),ts=Math.max(1,f*0.8)/Math.sqrt(k);
+    fl.attr('transform',function(d){var p=pj([d.lon,d.lat]);return 'translate('+p[0]+','+p[1]+') scale('+s+')'});
+    tw.selectAll('text,circle').attr('transform','scale('+ts+')');sg.attr('transform','translate('+sp[0]+','+sp[1]+') scale('+ts+')');
+  }
+  /* Tipp knapp neben ein Fähnchen: nächstgelegenes öffnen (innerhalb ca. 32 px am Bildschirm) */
+  svg.on('click',function(e){
+    if(e.target.closest&&e.target.closest('.flag'))return;
+    var pt=d3.pointer(e,root.node()),pxPerUnit=(el.clientWidth||1000)/W*k0,best=null,bd=1e9;
+    var s=fscale()/Math.sqrt(k0);
+    onMap.forEach(function(d){var p=pj([d.lon,d.lat]),x0=p[0]-10*s,x1=p[0]+((d._w||24)+10)*s,y0=p[1]-44*s,y1=p[1]+10*s;
+      var dx=Math.max(x0-pt[0],0,pt[0]-x1)*pxPerUnit,dy=Math.max(y0-pt[1],0,pt[1]-y1)*pxPerUnit,dd=Math.sqrt(dx*dx+dy*dy);if(dd<bd){bd=dd;best=d}});
+    if(best&&bd<=24)openLead(best.id);
+  });
+  var zoom=d3.zoom().scaleExtent([1,12]).translateExtent([[0,0],[W,H]])
     .filter(function(e){if(e.type==='touchstart')return e.touches.length>1||k0>1;return (!e.ctrlKey||e.type==='wheel')&&!e.button})
     .on('zoom',function(e){k0=e.transform.k;vui.zoom=e.transform;root.attr('transform',e.transform);place(k0);el.style.touchAction=k0>1?'none':'pan-y'});
   svg.call(zoom);
