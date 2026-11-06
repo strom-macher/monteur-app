@@ -416,7 +416,7 @@ function hoursTotal(p){return p.hours.reduce(function(s,x){return s+x.h},0)}
 function canStorno(by){return isOffice()||by===ME.id}
 function renderDetail(keep){
   if(ui.lead){renderLead(keep);return}
-  var d=$('#detail'),p=proj(ui.detail);
+  var d=$('#detail'),p=proj(ui.detail);d.classList.remove('ldet');
   if(!p){d.hidden=true;d.innerHTML='';return}
   var old=$('.dbody',d),st=keep&&old?old.scrollTop:0;
   var arch=p.status!=='aktiv',off=isOffice();
@@ -1400,14 +1400,16 @@ function mountMap(){
   var el=$('#vmap');if(!el)return;
   loadMapLibs().then(function(){if($('#vmap')===el)drawMap(el)}).catch(function(){el.innerHTML='<p class="hint vml">Karte konnte nicht geladen werden. Beim ersten Öffnen braucht die App Empfang.</p>'});
 }
-function drawMap(el){
-  var GEO=window.SM_GEO,W=1000,H=620,max=vMax();
+function drawMap(el,opts){
+  opts=opts||{};
+  var sel=opts.sel?lead(opts.sel):null,detail=!!opts.sel;
+  var GEO=window.SM_GEO,W=1000,cw=el.clientWidth||1000,ch=el.clientHeight||620,H=detail?Math.max(240,Math.round(W*ch/cw)):620,max=vMax();
   el.innerHTML='';
   var L=(S.leads||[]).filter(function(l){return l.lat!=null&&l.lon!=null});
-  var onMap=L.filter(function(l){return ['offen','nicht_erreicht','einplanen'].indexOf(l.st)>-1});
-  var svg=d3.select(el).append('svg').attr('viewBox','0 0 '+W+' '+H).attr('role','img').attr('aria-label','Karte mit '+onMap.length+' Leads');
+  var onMap=L.filter(function(l){return ['offen','nicht_erreicht','einplanen'].indexOf(l.st)>-1||(sel&&l.id===sel.id)});
+  var svg=d3.select(el).append('svg').attr('viewBox','0 0 '+W+' '+H).attr('preserveAspectRatio','xMidYMid slice').attr('role','img').attr('aria-label','Karte mit '+onMap.length+' Leads');
   var pts=[[15.18,47.68],[16.62,48.24]].concat(L.map(function(l){return [l.lon,l.lat]}));
-  var pj=d3.geoMercator().fitExtent([[14,40],[W-14,H-14]],{type:'MultiPoint',coordinates:pts});
+  var pj=d3.geoMercator().fitExtent(detail?[[14,14],[W-14,H-14]]:[[14,40],[W-14,H-14]],{type:'MultiPoint',coordinates:pts});
   var path=d3.geoPath(pj),line=d3.line().x(function(p){return pj(p)[0]}).y(function(p){return pj(p)[1]});
   var root=svg.append('g'),gLand=root.append('g'),gNet=root.append('g'),gTown=root.append('g'),gF=root.append('g');
   var feats=topojson.feature(GEO.AT,GEO.AT.objects.aut).features;
@@ -1422,14 +1424,15 @@ function drawMap(el){
   tw.append('text').attr('class',function(d){return 'town'+(d[3]?' big':'')}).attr('x',6).attr('y',13).text(function(d){return d[0]});
   var sp=pj([HQ.lon,HQ.lat]),sg=gTown.append('g').attr('transform','translate('+sp[0]+','+sp[1]+')');
   sg.append('rect').attr('x',-6).attr('y',-6).attr('width',12).attr('height',12).attr('class','hq');sg.append('text').attr('class','town big').attr('x',9).attr('y',-6).text('Start');
-  var fl=gF.selectAll('g.flag').data(onMap.slice().sort(function(a,b){return b.lat-a.lat})).join(function(en){
+  var fl=gF.selectAll('g.flag').data(onMap.slice().sort(function(a,b){if(sel){if(a.id===sel.id)return 1;if(b.id===sel.id)return -1}return b.lat-a.lat})).join(function(en){
     var g=en.append('g').attr('class','flag').attr('tabindex',0).attr('role','button');
     g.append('rect').attr('class','fhit').attr('x',-10).attr('y',-44).attr('height',54).attr('rx',8);
     g.append('circle').attr('r',3).attr('class','fp');g.append('line').attr('y2',-32).attr('class','fs');
     g.append('rect').attr('x',1).attr('y',-32).attr('height',18).attr('rx',2).attr('class','fr');
     g.append('text').attr('class','kt').attr('x',6).attr('y',-19);return g});
-  fl.attr('aria-label',function(d){return d.name+', '+fmtK(d.k)+' kWp'})
-    .on('click',function(e,d){openLead(d.id)}).on('keydown',function(e,d){if(e.key==='Enter'||e.key===' '){e.preventDefault();openLead(d.id)}});
+  fl.classed('sel',function(d){return !!sel&&d.id===sel.id}).classed('dim',function(d){return !!sel&&d.id!==sel.id})
+    .attr('aria-label',function(d){return d.name+', '+fmtK(d.k)+' kWp'})
+    .on('click',function(e,d){if(!sel||d.id!==sel.id)openLead(d.id)}).on('keydown',function(e,d){if(e.key==='Enter'||e.key===' '){e.preventDefault();openLead(d.id)}});
   fl.select('text.kt').text(function(d){return fmtK(d.k)});
   fl.select('.fr').attr('fill',function(d){return leadColor(d,max)}).attr('class',function(d){return 'fr s-'+d.st});
   fl.each(function(d){
@@ -1438,30 +1441,37 @@ function drawMap(el){
     if(d.km!=null){dt.append('tspan').attr('x',dx).attr('y',-24).text((d.km<10?d.km.toFixed(1).replace('.',','):Math.round(d.km))+' km');dt.append('tspan').attr('x',dx).attr('y',-15).text(fmtMin(d.min||0))}
   });
   var k0=1;
-  /* Fähnchen in Bildschirm-Größe denken: am Handy wird die 1000er-Karte stark verkleinert, darum größer zeichnen.
-     Beim Hineinzoomen wachsen sie mit der Wurzel des Zoomfaktors – größer, aber langsamer als die Karte. */
-  function fscale(){var cw=el.clientWidth||1000;return Math.max(1,Math.min(2.6,(1000/cw)*0.85))}
+  /* Fähnchen in Bildschirmgröße denken: am Handy wird die 1000er-Karte stark verkleinert, darum größer zeichnen.
+     Beim Hineinzoomen wachsen sie sichtbar mit (Bildschirmgröße steigt mit k^0,65), aber langsamer als die Karte. */
+  function fscale(){var w=el.clientWidth||1000;return Math.max(1,Math.min(2.6,(1000/w)*0.85))}
+  function fs(k){return fscale()/Math.pow(k,0.35)}
   function place(k){
-    var f=fscale(),s=f/Math.sqrt(k),ts=Math.max(1,f*0.8)/Math.sqrt(k);
-    fl.attr('transform',function(d){var p=pj([d.lon,d.lat]);return 'translate('+p[0]+','+p[1]+') scale('+s+')'});
+    var s=fs(k),ts=Math.max(1,fscale()*0.8)/Math.pow(k,0.6);
+    fl.attr('transform',function(d){var p=pj([d.lon,d.lat]);return 'translate('+p[0]+','+p[1]+') scale('+(sel&&d.id===sel.id?s*1.3:s)+')'});
     tw.selectAll('text,circle').attr('transform','scale('+ts+')');sg.attr('transform','translate('+sp[0]+','+sp[1]+') scale('+ts+')');
   }
-  /* Tipp knapp neben ein Fähnchen: nächstgelegenes öffnen (innerhalb ca. 32 px am Bildschirm) */
+  /* Tipp knapp neben ein Fähnchen: nächstgelegenes öffnen (bis ca. 24 px am Bildschirm) */
   svg.on('click',function(e){
+    if(e.defaultPrevented)return;
     if(e.target.closest&&e.target.closest('.flag'))return;
-    var pt=d3.pointer(e,root.node()),pxPerUnit=(el.clientWidth||1000)/W*k0,best=null,bd=1e9;
-    var s=fscale()/Math.sqrt(k0);
-    onMap.forEach(function(d){var p=pj([d.lon,d.lat]),x0=p[0]-10*s,x1=p[0]+((d._w||24)+10)*s,y0=p[1]-44*s,y1=p[1]+10*s;
+    var pt=d3.pointer(e,root.node()),r=svg.node().getBoundingClientRect(),pxPerUnit=Math.max(r.width/W,r.height/H)*k0,best=null,bd=1e9,s=fs(k0);
+    onMap.forEach(function(d){if(sel&&d.id===sel.id)return;var p=pj([d.lon,d.lat]),x0=p[0]-10*s,x1=p[0]+((d._w||24)+10)*s,y0=p[1]-44*s,y1=p[1]+10*s;
       var dx=Math.max(x0-pt[0],0,pt[0]-x1)*pxPerUnit,dy=Math.max(y0-pt[1],0,pt[1]-y1)*pxPerUnit,dd=Math.sqrt(dx*dx+dy*dy);if(dd<bd){bd=dd;best=d}});
     if(best&&bd<=24)openLead(best.id);
   });
-  var zoom=d3.zoom().scaleExtent([1,12]).translateExtent([[0,0],[W,H]])
-    .filter(function(e){if(e.type==='touchstart')return e.touches.length>1||k0>1;return (!e.ctrlKey||e.type==='wheel')&&!e.button})
-    .on('zoom',function(e){k0=e.transform.k;vui.zoom=e.transform;root.attr('transform',e.transform);place(k0);el.style.touchAction=k0>1?'none':'pan-y'});
-  svg.call(zoom);
-  if(vui.zoom)svg.call(zoom.transform,vui.zoom);else place(1);
-  el.style.touchAction=k0>1?'none':'pan-y';
-  vui.resetZoom=function(){svg.transition().duration(350).call(zoom.transform,d3.zoomIdentity)};
+  /* Alle Finger an d3 geben (sonst fehlt beim Zwei-Finger-Zoom der erste Finger); iOS-Seitenzoom auf der Karte unterbinden */
+  var zoom=d3.zoom().scaleExtent([1,14]).translateExtent([[-W*0.1,-H*0.1],[W*1.1,H*1.1]])
+    .on('zoom',function(e){k0=e.transform.k;if(!detail)vui.zoom=e.transform;root.attr('transform',e.transform);place(k0)});
+  svg.call(zoom).on('dblclick.zoom',null);
+  el.style.touchAction='none';
+  ['gesturestart','gesturechange','gestureend'].forEach(function(ev){el.addEventListener(ev,function(x){x.preventDefault()},{passive:false})});
+  if(detail&&sel&&sel.lat!=null){
+    var p=pj([sel.lon,sel.lat]),k=4;
+    svg.call(zoom.transform,d3.zoomIdentity.translate(W/2-k*p[0],H*0.7-k*p[1]).scale(k));
+  }else if(!detail&&vui.zoom)svg.call(zoom.transform,vui.zoom);
+  else place(1);
+  if(!detail)vui.resetZoom=function(){svg.transition().duration(350).call(zoom.transform,d3.zoomIdentity)};
+  if(detail&&sel&&sel.lat==null)d3.select(el).append('p').attr('class','hint vml nopos').text('Für diesen Lead ist noch keine Kartenposition bekannt.');
 }
 
 /* Lead-Detail */
@@ -1485,8 +1495,10 @@ function renderLead(keep){
   }
   var kNote=l.kOv!=null?'angepasst · Vorschlag war '+esc(fmtK(l.kEst))+' kWp <button class="lnk" data-act="leadKwpReset">Zurück auf Vorschlag</button>':(l.kb?'Schätzung: '+esc(l.kb):'');
   var srcOpts=VSRC.map(function(x){return '<option value="'+x[0]+'"'+(l.src===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+(VSRC.some(function(x){return x[0]===l.src})?'':'<option value="'+esc(l.src)+'" selected>'+esc(l.src)+'</option>');
-  d.hidden=false;
-  d.innerHTML='<div class="dhead"><button class="x" data-act="closeDetail" aria-label="Zurück">'+ico.back+'</button><h1>'+esc(l.name)+'</h1></div>'+
+  var mapSig=l.id+'|'+l.st+'|'+l.k+'|'+vui.prism+'|'+l.lat+'|'+l.lon+'|'+(C.leads||[]).length,om=$('#vmapd'),keepMap=om&&om.dataset.sig===mapSig?om:null;
+  if(keepMap)keepMap.parentNode.removeChild(keepMap);
+  d.hidden=false;d.classList.add('ldet');
+  d.innerHTML='<div class="dmap" id="vmapd-slot"></div><div class="dhead"><button class="x" data-act="closeDetail" aria-label="Zurück zur Übersicht">'+ico.back+'</button><h1>'+esc(l.name)+'</h1></div>'+
   '<div class="dbody">'+
   '<div class="lhead"><span class="lsw big s-'+s+'" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(fmtK(l.k))+'</b><small>kWp</small>'+XSVG+'</span>'+
   '<div class="grow"><div class="lst"><span class="vpill s-'+s+'">'+VST[s]+'</span><span class="tag">'+esc(srcLabel(l.src))+'</span></div><div class="hint">'+(l.stAt?'Status gesetzt am '+esc(fmtStamp(l.stAt)):'Noch kein Status gesetzt')+'</div></div></div>'+
@@ -1508,6 +1520,10 @@ function renderLead(keep){
   (isOffice()?'<button class="btn danger wide" data-act="leadDelete">'+(ui.confirm==='ld'+l.id?'Wirklich löschen? Nochmal tippen':'Lead löschen')+'</button>':'')+
   '</div>';
   var nb=$('.dbody',d);if(nb&&st)nb.scrollTop=st;
+  var slot=$('#vmapd-slot');
+  if(keepMap)slot.parentNode.replaceChild(keepMap,slot);
+  else{slot.id='vmapd';slot.dataset.sig=mapSig;slot.innerHTML='<p class="hint vml">Karte wird geladen…</p>';
+    loadMapLibs().then(function(){if(slot.isConnected)drawMap(slot,{sel:l.id})}).catch(function(){slot.innerHTML='<p class="hint vml">Karte offline nicht verfügbar.</p>'})}
   var ta=$('#lnote');if(ta)ta.addEventListener('input',function(){var x=$('#lnote-st');if(x)x.textContent='Ungespeicherte Änderung – wird beim Verlassen des Feldes gespeichert'});
 }
 function histHtml(l){
@@ -1515,7 +1531,7 @@ function histHtml(l){
   var src=l.hist.length?'<li class="hsep">aus '+esc(srcLabel(l.src))+':</li>'+l.hist.map(function(x){return '<li class="hsrc">'+esc(x)+'</li>'}).join(''):'';
   return own+src||'<li class="hint">Noch kein Verlauf.</li>';
 }
-function openLead(id){if(ui.sheetKind)closeSheet();ui.confirm=null;ui.lead=id;ui.detail=null;renderLead()}
+function openLead(id){if(ui.sheetKind)closeSheet();ui.confirm=null;ui.lead=id;ui.detail=null;renderLead();var b=$('#detail .dbody');if(b)b.scrollTop=0}
 function logLead(id,text){mut('lead_log','up',{id:uuid(),lead_id:id,text:text,at:new Date().toISOString(),created_by:ME.id,by_name:null})}
 function setLeadStatus(id,s){
   var l=lead(id);if(!l)return;
