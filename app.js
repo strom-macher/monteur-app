@@ -45,7 +45,7 @@ var idb=(function(){
 })();
 
 /* ---------- Tabellen ---------- */
-var TABLES=['profiles','projects','tasks','hours','photos','materials','material_costs','stock_moves','delivery_suppliers'];
+var TABLES=['profiles','projects','tasks','hours','photos','materials','material_costs','stock_moves','delivery_suppliers','leads','lead_log'];
 var COLS={
   profiles:['id','name','role','active'],
   projects:['id','kundennr','name','short','addr','phone','phone2','email','note','termin','status','created_at'],
@@ -55,7 +55,9 @@ var COLS={
   materials:['id','name','unit','min_stock','note'],
   material_costs:['material_id','price','supplier','artnr'],
   stock_moves:['id','material_id','project_id','qty','kind','loc','note','created_by','created_at'],
-  delivery_suppliers:['move_id','supplier']
+  delivery_suppliers:['move_id','supplier'],
+  leads:['id','name','short','anrede','phone','phone2','email','addr','ort','objekt','ausrichtung','dach','verbrauch','speicher','wuensche','budget','umsetzung','personen','eingang','info','last_info','kwp_basis','kwp_est','kwp','source','lat','lon','km','min','status','status_at','termin','invite_at','invite_termin','notiz','notiz_at','src_hist','created_at','created_by'],
+  lead_log:['id','lead_id','text','at','created_by','by_name']
 };
 var LOCS=[{k:'haupt',n:'Hauptlager'},{k:'buero',n:'Büro'},{k:'gross',n:'Großwagen'},{k:'klein',n:'Kleinwagen'}];
 var LOCK=LOCS.map(function(l){return l.k});
@@ -67,7 +69,7 @@ function emptyC(){var c={me:null,pulledAt:0};TABLES.forEach(function(t){c[t]=[]}
 
 var C=emptyC();      /* lokaler Spiegel der Datenbank */
 var OB=[];           /* Warteschlange: noch nicht übertragene Änderungen */
-var S={projects:[],tasks:[],mats:[]};  /* abgeleitete Sicht für die Oberfläche */
+var S={projects:[],tasks:[],mats:[],leads:[]};  /* abgeleitete Sicht für die Oberfläche */
 var PEOPLE=[];
 var ME=null;
 var sb=null,SESSION=null;
@@ -118,6 +120,7 @@ function build(){
     return {id:t.id,name:t.name,project:t.project_id||null,assignee:t.assignee||null,due:t.due||null,time:t.due_time||'',
       created:msOf(t.created_at),done:!!t.done,doneAt:msOf(t.done_at),by:t.created_by};
   });
+  buildLeads();
 }
 
 /* ---------- Lokale Änderungen anwenden ---------- */
@@ -131,6 +134,7 @@ function applyLocal(o){
     var k2=PK(t);C[t]=C[t].filter(function(r){return r[k2]!==o.row[k2]});
     if(t==='materials'){['material_costs'].forEach(function(x){C[x]=C[x].filter(function(r){return r.material_id!==o.row.id})});C.stock_moves=C.stock_moves.filter(function(r){return r.material_id!==o.row.id})}
     if(t==='stock_moves')C.delivery_suppliers=C.delivery_suppliers.filter(function(r){return r.move_id!==o.row.id});
+    if(t==='leads')C.lead_log=C.lead_log.filter(function(r){return r.lead_id!==o.row.id});
   }else if(o.op==='rpc'&&o.fn==='set_material_note'){
     var j=idxOf(C.materials,'id',o.args.p_id);if(j>=0)C.materials[j].note=o.args.p_note;
   }
@@ -264,7 +268,7 @@ var ico={
   bolt:'<svg width="20" height="20" viewBox="0 0 24 24" fill="#101514"><path d="M13 2L5 13.5h5.5L9.5 22 19 9.5h-5.8z"/></svg>'
 };
 /* ---------- Oberfläche ---------- */
-var ui={tab:'home',detail:null,sheet:null,pend:{},tm:'active',tf:'all',m:null,h:{val:0},scanNext:null,confirm:null,sheetKind:'',curMat:null};
+var ui={tab:'start',lead:null,detail:null,sheet:null,pend:{},tm:'active',tf:'all',m:null,h:{val:0},scanNext:null,confirm:null,sheetKind:'',curMat:null};
 var PH_URL={};   /* lokale Fotos, die noch nicht hochgeladen sind */
 var SU={};       /* signierte Foto-Adressen */
 
@@ -369,7 +373,15 @@ function tabHome(){
 function renderTab(anim){
   if(!ME)return;
   $('#tabBody').classList.toggle('still',anim===false);
-  var h=ui.tab==='home'?tabHome():ui.tab==='lager'?tabLager():ui.tab==='projekte'?tabProjekte():tabAufgaben();
+  if(ui.tab==='vertrieb'){
+    var sg=vSig();if(anim===false&&sg===vui.sig&&$('#vmap'))return;
+    var vb=$('#vbody'),vst=anim===false&&vb?vb.scrollTop:0;
+    vui.sig=sg;$('#tabBody').innerHTML=tabVertrieb();mountMap();
+    var nb=$('#vbody');if(nb&&vst)nb.scrollTop=vst;
+    geoPending();return;
+  }
+  vui.sig='';
+  var h=ui.tab==='start'?tabStart():ui.tab==='home'?tabHome():ui.tab==='lager'?tabLager():ui.tab==='projekte'?tabProjekte():tabAufgaben();
   $('#tabBody').innerHTML=h;
 }
 
@@ -403,6 +415,7 @@ function renderBubbles(){
 function hoursTotal(p){return p.hours.reduce(function(s,x){return s+x.h},0)}
 function canStorno(by){return isOffice()||by===ME.id}
 function renderDetail(keep){
+  if(ui.lead){renderLead(keep);return}
   var d=$('#detail'),p=proj(ui.detail);
   if(!p){d.hidden=true;d.innerHTML='';return}
   var old=$('.dbody',d),st=keep&&old?old.scrollTop:0;
@@ -444,7 +457,7 @@ function renderDetail(keep){
   var nb=$('.dbody',d);if(nb&&st)nb.scrollTop=st;
   loadPhotos();
 }
-function refresh(keep){renderTab(false);renderBubbles();renderHeader();if(ui.detail)renderDetail(keep)}
+function refresh(keep){renderTab(false);renderBubbles();renderHeader();if(ui.detail||ui.lead)renderDetail(keep)}
 function afterChange(){
   if(!ME)return;
   if(ui.view==='app'){
@@ -1016,7 +1029,7 @@ function sheetTeam(){
 
 /* ---------- Aktionen ---------- */
 function setTab(t){
-  if(ui.detail){ui.detail=null;renderDetail()}
+  if(ui.detail||ui.lead){ui.detail=null;ui.lead=null;renderDetail()}
   if(ui.sheetKind)closeSheet();
   ui.tab=t;renderHeader();renderTab(true);
 }
@@ -1038,7 +1051,7 @@ function sheetTasksAllKeep(){keepRender(sheetTasksAll)}
 
 var actions={
   tab:function(el){setTab(el.dataset.tab)},
-  home:function(){setTab('home')},
+  home:function(){setTab('start')},
   user:function(){ui.confirm=null;sheetUser()},
   closeSheet:closeSheet,
   addTask:function(el){sheetTaskNew(el.dataset.pid||null)},
@@ -1050,9 +1063,9 @@ var actions={
   setDate:function(el){var v=el.dataset.v;$('#td').value=v===''?'':dayOff(Number(v))},
   openProj:function(el){
     var wasSheet=ui.sheetKind;if(wasSheet)closeSheet();
-    ui.detail=el.dataset.id;renderDetail();
+    ui.lead=null;ui.detail=el.dataset.id;renderDetail();
   },
-  closeDetail:function(){ui.detail=null;renderDetail();refresh()},
+  closeDetail:function(){ui.detail=null;ui.lead=null;ui.confirm=null;renderDetail();refresh()},
   newProj:function(){sheetProjForm(null)},
   editProj:function(){var p=proj(ui.detail);if(p)sheetProjForm(p)},
   projArchive:function(){sheetProjList('archive')},
@@ -1166,6 +1179,7 @@ document.addEventListener('input',function(e){
 });
 document.addEventListener('change',function(e){
   var c=e.target.closest('[data-change]');if(!c)return;
+  if(vchange[c.dataset.change]){vchange[c.dataset.change](c);return}
   if(c.dataset.change==='pname'){var nm=c.value.trim();if(nm)mut('profiles','up',{id:c.dataset.id,name:nm});else toast('Ein Name darf nicht leer sein.')}
 });
 document.addEventListener('keydown',function(e){if(e.key==='Escape'&&ui.sheetKind)closeSheet()});
@@ -1259,6 +1273,7 @@ function route(){
 }
 function showApp(){
   ui.view='app';$('#auth').hidden=true;build();
+  if(!ui.started){ui.started=true;ui.tab='start'}
   renderHeader();renderTab(true);renderBubbles();
   remind();
 }
@@ -1272,6 +1287,380 @@ function remind(){
     el.classList.add('on');clearTimeout(remind.k);remind.k=setTimeout(function(){el.classList.remove('on')},6000);
   }catch(e){}
 }
+
+/* ---------- Vertrieb: PV-Leads mit Karte (übernommen aus der PV-Lead-Karte) ---------- */
+var VST={offen:'Rückruf offen',nicht_erreicht:'Nicht erreicht',einplanen:'Eingeplant',wiedervorlage:'Wiedervorlage',angeboten:'Angeboten',verworfen:'Verworfen',beauftragt:'Beauftragt',verloren:'Verloren'};
+var VORDER=['offen','nicht_erreicht','einplanen','angeboten','wiedervorlage','verworfen','beauftragt','verloren'];
+var VDATED=['einplanen','wiedervorlage'];
+var VGONE=['verworfen','beauftragt','verloren'];
+var VBTN=[['nicht_erreicht','Nicht erreicht'],['einplanen','Einplanen'],['wiedervorlage','Wiedervorlage'],['angeboten','Angeboten'],['beauftragt','Beauftragt'],['verloren','Verloren'],['verworfen','Verwerfen']];
+var VSRC=[['Tuny','tunyCRM'],['SM','solarmaker'],['Empf','Empfehlung']];
+var HQ={lat:48.087,lon:16.302,label:'Grenzgasse 40, 2340 Mödling'};
+var V_ARCH=28*864e5;
+var vui={prism:true,arch:false,zoom:null,sig:'',edit:null,geo:null,busy:false};
+
+function buildLeads(){
+  var logs={};
+  (C.lead_log||[]).forEach(function(e){(logs[e.lead_id]=logs[e.lead_id]||[]).push({id:e.id,text:e.text,at:msOf(e.at),by:e.created_by,byName:e.by_name||''})});
+  S.leads=(C.leads||[]).map(function(r){
+    var kEst=r.kwp_est==null||r.kwp_est===''?null:Number(r.kwp_est),kOv=r.kwp==null||r.kwp===''?null:Number(r.kwp);
+    var k=kOv!=null?kOv:kEst;
+    var n=function(x){return x==null||x===''||!isFinite(Number(x))?null:Number(x)};
+    return {id:r.id,name:r.name||'Unbekannt',short:r.short||shortOf(r.name||'Lead'),anrede:r.anrede||'',phone:r.phone||'',phone2:r.phone2||'',email:r.email||'',
+      addr:r.addr||'',ort:r.ort||'',objekt:r.objekt||'',ausrichtung:r.ausrichtung||'',dach:r.dach||'',verbrauch:r.verbrauch||'',speicher:r.speicher||'',
+      wuensche:r.wuensche||'',budget:r.budget||'',umsetzung:r.umsetzung||'',personen:r.personen||'',eingang:r.eingang||'',info:r.info||'',last:r.last_info||'',
+      kb:r.kwp_basis||'',kEst:kEst,kOv:kOv,k:k,src:r.source||'Tuny',lat:n(r.lat),lon:n(r.lon),km:n(r.km),min:n(r.min),
+      st:r.status||'offen',stAt:msOf(r.status_at),termin:r.termin||'',inviteAt:msOf(r.invite_at),inviteT:r.invite_termin||'',
+      notiz:r.notiz||'',notizAt:msOf(r.notiz_at),hist:Array.isArray(r.src_hist)?r.src_hist:[],created:msOf(r.created_at),
+      log:(logs[r.id]||[]).sort(function(a,b){return b.at-a.at})};
+  });
+}
+var lead=function(id){return (S.leads||[]).filter(function(l){return l.id===id})[0]};
+var isArchLead=function(l){return l.st==='verworfen'&&l.stAt&&(Date.now()-l.stAt)>V_ARCH};
+function srcLabel(s){for(var i=0;i<VSRC.length;i++)if(VSRC[i][0]===s)return VSRC[i][1];return s||'–'}
+function fmtK(k){return k==null?'?':(Math.round(k*10)/10).toString().replace('.',',')}
+function fmtKm(l){if(l.km==null)return 'Entfernung unbekannt';return (l.km<10?l.km.toFixed(1).replace('.',','):Math.round(l.km))+' km · '+fmtMin(l.min||0)}
+function fmtMin(m){m=Math.round(m);return m<60?m+' min':Math.floor(m/60)+' h '+String(m%60).padStart(2,'0')}
+function fmtTermin(v){
+  if(!v)return '';var x=new Date(v);if(isNaN(x))return '';
+  return x.toLocaleDateString('de-AT',{weekday:'short',day:'2-digit',month:'2-digit',year:'numeric'})+', '+x.toLocaleTimeString('de-AT',{hour:'2-digit',minute:'2-digit'})+' Uhr';
+}
+function fmtStamp(ms){return ms?new Date(ms).toLocaleString('de-AT',{dateStyle:'short',timeStyle:'short'}):''}
+function vMax(){var m=0;(S.leads||[]).forEach(function(l){if(l.k!=null&&l.k>m)m=l.k});return m||1}
+function hsl2hex(h,s,l){
+  h=((h%360)+360)%360;var c=(1-Math.abs(2*l-1))*s,x=c*(1-Math.abs((h/60)%2-1)),m=l-c/2,r=0,g=0,b=0;
+  if(h<60){r=c;g=x}else if(h<120){r=x;g=c}else if(h<180){g=c;b=x}else if(h<240){g=x;b=c}else if(h<300){r=x;b=c}else{r=c;b=x}
+  var hx=function(v){return ('0'+Math.round((v+m)*255).toString(16)).slice(-2)};return '#'+hx(r)+hx(g)+hx(b);
+}
+function prism(k,max){return hsl2hex(270-270*Math.min(1,k/max),0.75,0.5)}
+function leadColor(l,max){return l.k==null?'#888780':(vui.prism?prism(l.k,max||vMax()):'#2F7FD0')}
+function kmFrom(lat,lon){
+  var R=6371,rad=Math.PI/180,dl=(lat-HQ.lat)*rad,dn=(lon-HQ.lon)*rad;
+  var a=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(HQ.lat*rad)*Math.cos(lat*rad)*Math.sin(dn/2)*Math.sin(dn/2);
+  var air=2*R*Math.asin(Math.sqrt(a)),road=air*1.3;
+  return {km:Math.round(road*10)/10,min:Math.round(road*0.65+6)};
+}
+var XSVG='<svg class="lx" viewBox="0 0 64 48" preserveAspectRatio="none" aria-hidden="true"><g stroke-linecap="round"><line x1="6" y1="6" x2="58" y2="42" stroke="#fff" stroke-width="7"/><line x1="58" y1="6" x2="6" y2="42" stroke="#fff" stroke-width="7"/><line x1="6" y1="6" x2="58" y2="42" stroke="#E5483A" stroke-width="4"/><line x1="58" y1="6" x2="6" y2="42" stroke="#E5483A" stroke-width="4"/></g></svg>';
+
+/* Startauswahl */
+function tabStart(){
+  var hr=new Date().getHours(),g=hr<11?'Guten Morgen':hr<18?'Guten Tag':'Guten Abend';
+  var L=S.leads||[],now=new Date(),wk=new Date(now.getTime()+7*864e5);
+  var open=L.filter(function(l){return l.st==='offen'||l.st==='nicht_erreicht'}).length;
+  var soon=L.filter(function(l){if(!VDATED.includes(l.st)||!l.termin)return false;var t=new Date(l.termin);return t>=new Date(now.getTime()-36e5)&&t<=wk}).length;
+  var tasks=S.tasks.filter(function(t){return !t.done}).length,heute=activeProjects().filter(function(p){return p.termin===TODAY()}).length;
+  return '<div class="home start"><svg class="lg rise" style="--i:0" viewBox="0 0 3067 3610" role="img" aria-label="strom-macher Logo"><use href="#sm-logo"/></svg>'+
+    '<h1 class="rise" style="--i:1">strom-macher</h1><p class="hi rise" style="--i:1">'+g+', '+esc(first(ME.name))+'</p>'+
+    '<div class="hbtns">'+
+    '<button class="hbtn vbtn rise" style="--i:2" data-act="tab" data-tab="vertrieb"><span>Vertrieb<em>Leads · Karte · Termine</em></span><small>'+open+(open===1?' Rückruf offen':' Rückrufe offen')+'<br>'+soon+(soon===1?' Termin':' Termine')+' in 7 Tagen</small></button>'+
+    '<button class="hbtn bbtn rise" style="--i:3" data-act="tab" data-tab="home"><span>Betrieb<em>Aufgaben · Lager · Projekte</em></span><small>'+tasks+' Aufgaben offen<br>'+heute+(heute===1?' Termin heute':' Termine heute')+'</small></button>'+
+    '</div></div>';
+}
+
+/* Vertrieb: Übersicht */
+function leadCard(l,max){
+  var s=l.st,dated=VDATED.includes(s);
+  var note=l.notiz?'<span class="lc-n">✎ '+esc(l.notiz.split('\n')[0].slice(0,60))+(l.notiz.length>60?'…':'')+'</span>':'';
+  var term=dated?'<span class="lc-t">'+(s==='wiedervorlage'?'Wiedervorlage':'Termin')+': '+(l.termin?esc(fmtTermin(l.termin)):'noch offen')+'</span>':'';
+  return '<button class="lcard s-'+s+'" data-act="openLead" data-id="'+esc(l.id)+'"><span class="lsw" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(fmtK(l.k))+'</b>'+XSVG+'</span>'+
+    '<span class="grow"><span class="t">'+esc(l.short)+' <i class="src">'+esc(l.src)+'</i></span><span class="s">'+esc(l.ort||city(l.addr))+' · '+esc(fmtKm(l))+'</span>'+term+note+'</span></button>';
+}
+function tabVertrieb(){
+  var L=S.leads||[],max=vMax();
+  var arr=L.filter(function(l){return vui.arch||!isArchLead(l)});
+  var nArch=L.filter(isArchLead).length;
+  var tk=function(l){return VDATED.includes(l.st)?(l.termin||'9999'):''};
+  arr.sort(function(a,b){return VORDER.indexOf(a.st)-VORDER.indexOf(b.st)||(tk(a)<tk(b)?-1:tk(a)>tk(b)?1:0)||((b.k==null?-1:b.k)-(a.k==null?-1:a.k))});
+  var groups=VORDER.map(function(s){
+    var it=arr.filter(function(l){return l.st===s});
+    var head='<div class="sec g-'+s+'"><span>'+VST[s]+' <span class="num">('+it.length+')</span></span>'+(s==='verworfen'&&nArch?'<button class="btn small" data-act="vArch">'+(vui.arch?'Ältere ausblenden':nArch+' älter als 4 Wochen')+'</button>':'')+'</div>';
+    return '<div class="vgrp">'+head+(it.length?'<div class="lcards">'+it.map(function(l){return leadCard(l,max)}).join('')+'</div>':'<p class="hint vempty">'+(s==='offen'?'Keine offenen Rückrufe.':'Keine Leads in diesem Status.')+'</p>')+'</div>';
+  }).join('');
+  var grad='linear-gradient(to right,'+[0,.1,.2,.3,.4,.5,.6,.7,.8,.9,1].map(function(f){return prism(f*max,max)}).join(',')+')';
+  return '<div class="titlebar rise" style="--i:0"><div class="pill">Vertrieb</div><button class="plus" data-act="leadNew" aria-label="Neuer Lead">+</button></div>'+
+    '<div class="body" id="vbody"><div id="vcap" class="vcap">'+
+    '<div class="vtools noshot"><button class="chip" data-act="vPrism">'+(vui.prism?'Prismafarben aus':'Prismafarben an')+'</button><button class="chip" data-act="vReset">Ansicht zurücksetzen</button><button class="chip" data-act="vSnap">Snapshot</button></div>'+
+    '<div class="vshot-h" hidden><b>PV-Lead-Karte</b> · Stand '+esc(fmtStamp(Date.now()))+'</div>'+
+    '<div class="vmap" id="vmap" aria-label="Karte Niederösterreich und Wien mit Lead-Fähnchen"><p class="hint vml">Karte wird geladen…</p></div>'+
+    '<div class="vleg"><span class="lg">0 kWp <i class="grad" style="background:'+grad+'"></i> '+esc(fmtK(max))+' kWp</span><span class="lg"><i class="sq" style="background:#888780"></i>unbekannt</span>'+
+    '<span class="lg"><i class="sq o" style="border-color:var(--yellow)"></i>nicht erreicht</span><span class="lg"><i class="sq o" style="border-color:var(--blue)"></i>eingeplant</span>'+
+    '<span class="lg"><i class="ln" style="background:#E8A33D"></i>Autobahn</span><span class="lg"><i class="ln d"></i>Bahn</span><span class="lg"><i class="ln" style="background:#3B82C4"></i>Flüsse</span></div>'+
+    '<p class="hint">Auf der Karte: Rückruf offen, nicht erreicht, eingeplant. Zoomen mit zwei Fingern oder Mausrad, Fähnchen antippen öffnet den Lead.</p>'+
+    groups+'</div></div>';
+}
+function vSig(){return JSON.stringify([vui.prism,vui.arch,(C.leads||[]).length,C.leads,(C.lead_log||[]).length])}
+
+/* Karte (D3, alle Daten lokal – funktioniert offline) */
+var vlibs=null;
+function loadMapLibs(){
+  if(!vlibs)vlibs=Promise.all([loadScript('vendor/d3.min.js'),loadScript('vendor/topojson-client.min.js'),loadScript('vendor/leadmap-geo.js')]).catch(function(e){vlibs=null;throw e});
+  return vlibs;
+}
+function mountMap(){
+  var el=$('#vmap');if(!el)return;
+  loadMapLibs().then(function(){if($('#vmap')===el)drawMap(el)}).catch(function(){el.innerHTML='<p class="hint vml">Karte konnte nicht geladen werden. Beim ersten Öffnen braucht die App Empfang.</p>'});
+}
+function drawMap(el){
+  var GEO=window.SM_GEO,W=1000,H=620,max=vMax();
+  el.innerHTML='';
+  var L=(S.leads||[]).filter(function(l){return l.lat!=null&&l.lon!=null});
+  var onMap=L.filter(function(l){return ['offen','nicht_erreicht','einplanen'].indexOf(l.st)>-1});
+  var svg=d3.select(el).append('svg').attr('viewBox','0 0 '+W+' '+H).attr('role','img').attr('aria-label','Karte mit '+onMap.length+' Leads');
+  var pts=[[15.18,47.68],[16.62,48.24]].concat(L.map(function(l){return [l.lon,l.lat]}));
+  var pj=d3.geoMercator().fitExtent([[14,40],[W-14,H-14]],{type:'MultiPoint',coordinates:pts});
+  var path=d3.geoPath(pj),line=d3.line().x(function(p){return pj(p)[0]}).y(function(p){return pj(p)[1]});
+  var root=svg.append('g'),gLand=root.append('g'),gNet=root.append('g'),gTown=root.append('g'),gF=root.append('g');
+  var feats=topojson.feature(GEO.AT,GEO.AT.objects.aut).features;
+  gLand.selectAll('path').data(feats).join('path').attr('d',path).attr('class',function(d){return d.properties.name==='Wien'?'lw':'ll'}).attr('vector-effect','non-scaling-stroke');
+  gNet.selectAll('.rv').data(GEO.G.riv).join('path').attr('d',line).attr('class','rv');
+  gNet.selectAll('.lk').data(GEO.G.lake).join('path').attr('d',line).attr('class','lk');
+  gNet.selectAll('.rl').data(GEO.G.rail).join('path').attr('d',line).attr('class','rl');
+  gNet.selectAll('.rd').data(GEO.G.roads).join('path').attr('d',function(d){return line(d[1])}).attr('class',function(d){return d[0]==='M'?'rd m':'rd'});
+  gNet.selectAll('path').attr('vector-effect','non-scaling-stroke');
+  var tw=gTown.selectAll('g').data(GEO.T).join('g').attr('transform',function(d){var p=pj([d[1],d[2]]);return 'translate('+p[0]+','+p[1]+')'});
+  tw.append('circle').attr('r',function(d){return d[3]?4:2.6}).attr('class','tc');
+  tw.append('text').attr('class',function(d){return 'town'+(d[3]?' big':'')}).attr('x',6).attr('y',13).text(function(d){return d[0]});
+  var sp=pj([HQ.lon,HQ.lat]),sg=gTown.append('g').attr('transform','translate('+sp[0]+','+sp[1]+')');
+  sg.append('rect').attr('x',-6).attr('y',-6).attr('width',12).attr('height',12).attr('class','hq');sg.append('text').attr('class','town big').attr('x',9).attr('y',-6).text('Start');
+  var fl=gF.selectAll('g.flag').data(onMap.slice().sort(function(a,b){return b.lat-a.lat})).join(function(en){
+    var g=en.append('g').attr('class','flag').attr('tabindex',0).attr('role','button');
+    g.append('circle').attr('r',3).attr('class','fp');g.append('line').attr('y2',-32).attr('class','fs');
+    g.append('rect').attr('x',1).attr('y',-32).attr('height',18).attr('rx',2).attr('class','fr');
+    g.append('text').attr('class','kt').attr('x',6).attr('y',-19);return g});
+  fl.attr('aria-label',function(d){return d.name+', '+fmtK(d.k)+' kWp'})
+    .on('click',function(e,d){openLead(d.id)}).on('keydown',function(e,d){if(e.key==='Enter'||e.key===' '){e.preventDefault();openLead(d.id)}});
+  fl.select('text.kt').text(function(d){return fmtK(d.k)});
+  fl.select('.fr').attr('fill',function(d){return leadColor(d,max)}).attr('class',function(d){return 'fr s-'+d.st});
+  fl.each(function(d){
+    var g=d3.select(this),w=g.select('text.kt').node().getComputedTextLength()+11;g.select('rect').attr('width',w);
+    var right=pj([d.lon,d.lat])[0]>W-90,dx=right?-4:w+4,dt=g.append('text').attr('class','dist').attr('text-anchor',right?'end':'start');
+    if(d.km!=null){dt.append('tspan').attr('x',dx).attr('y',-24).text((d.km<10?d.km.toFixed(1).replace('.',','):Math.round(d.km))+' km');dt.append('tspan').attr('x',dx).attr('y',-15).text(fmtMin(d.min||0))}
+  });
+  var k0=1;
+  function place(k){fl.attr('transform',function(d){var p=pj([d.lon,d.lat]);return 'translate('+p[0]+','+p[1]+') scale('+(1/k)+')'});tw.selectAll('text,circle').attr('transform','scale('+(1/k)+')');sg.attr('transform','translate('+sp[0]+','+sp[1]+') scale('+(1/k)+')')}
+  var zoom=d3.zoom().scaleExtent([1,8]).translateExtent([[0,0],[W,H]])
+    .filter(function(e){if(e.type==='touchstart')return e.touches.length>1||k0>1;return (!e.ctrlKey||e.type==='wheel')&&!e.button})
+    .on('zoom',function(e){k0=e.transform.k;vui.zoom=e.transform;root.attr('transform',e.transform);place(k0);el.style.touchAction=k0>1?'none':'pan-y'});
+  svg.call(zoom);
+  if(vui.zoom)svg.call(zoom.transform,vui.zoom);else place(1);
+  el.style.touchAction=k0>1?'none':'pan-y';
+  vui.resetZoom=function(){svg.transition().duration(350).call(zoom.transform,d3.zoomIdentity)};
+}
+
+/* Lead-Detail */
+function vrow(k,v){return v?'<tr><td>'+k+'</td><td>'+v+'</td></tr>':''}
+function renderLead(keep){
+  var d=$('#detail'),l=lead(ui.lead);
+  if(!l){d.hidden=true;d.innerHTML='';return}
+  var ae=document.activeElement;
+  if(keep&&ae&&d.contains(ae)&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)){var hc=$('#lhist',d);if(hc)hc.innerHTML=histHtml(l);return}
+  var old=$('.dbody',d),st=keep&&old?old.scrollTop:0,s=l.st,max=vMax();
+  var telh=String(l.phone||'').replace(/[^\d+]/g,''),tel2=String(l.phone2||'').replace(/[^\d+]/g,'');
+  var q=encodeURIComponent(String(l.addr||l.ort).replace(/\s*\(.*?\)\s*/g,' ').trim()+', Österreich');
+  var links=[['Google Karte','https://www.google.com/maps/search/?api=1&query='+q],['Satellit','https://maps.google.com/maps?q='+q+'&t=k'],['Apple Karten','https://maps.apple.com/?q='+q+'&t=k']];
+  var acts=VBTN.map(function(b){return '<button class="vst s-'+b[0]+'" data-act="leadStatus" data-v="'+b[0]+'" aria-pressed="'+(s===b[0])+'">'+(b[0]==='verworfen'?'<i class="ix">✕</i>':b[0]==='beauftragt'?'<i class="ok">✓</i>':'<i class="dot"></i>')+b[1]+'</button>'}).join('');
+  var term='';
+  if(VDATED.includes(s)){
+    var wv=s==='wiedervorlage',changed=l.inviteAt&&l.inviteT&&l.termin&&l.inviteT!==l.termin;
+    term='<div class="vterm"><label for="ltermin">'+(wv?'Wiedervorlage am':'Termin')+'</label><input id="ltermin" type="datetime-local" step="900" data-change="leadTermin" value="'+esc(l.termin)+'">'+
+      (l.termin?'<a class="btn main wide" data-act="leadOutlook" href="'+esc(outlookUrl(l))+'" target="_blank" rel="noopener">In Outlook eintragen'+(l.email?' &amp; einladen':'')+'</a>':'<p class="hint">Datum und Uhrzeit wählen, dann kann der Termin in Outlook eingetragen werden.</p>')+
+      (l.inviteAt?'<p class="hint">'+(changed?'<b style="color:var(--red)">'+(wv?'Datum':'Termin')+' geändert – bitte erneut eintragen. </b>':'')+'Outlook-Einladung geöffnet am '+esc(fmtStamp(l.inviteAt))+' für '+esc(fmtTermin(l.inviteT))+'</p>':'')+'</div>';
+  }
+  var kNote=l.kOv!=null?'angepasst · Vorschlag war '+esc(fmtK(l.kEst))+' kWp <button class="lnk" data-act="leadKwpReset">Zurück auf Vorschlag</button>':(l.kb?'Schätzung: '+esc(l.kb):'');
+  var srcOpts=VSRC.map(function(x){return '<option value="'+x[0]+'"'+(l.src===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+(VSRC.some(function(x){return x[0]===l.src})?'':'<option value="'+esc(l.src)+'" selected>'+esc(l.src)+'</option>');
+  d.hidden=false;
+  d.innerHTML='<div class="dhead"><button class="x" data-act="closeDetail" aria-label="Zurück">'+ico.back+'</button><h1>'+esc(l.name)+'</h1></div>'+
+  '<div class="dbody">'+
+  '<div class="lhead"><span class="lsw big s-'+s+'" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(fmtK(l.k))+'</b><small>kWp</small>'+XSVG+'</span>'+
+  '<div class="grow"><div class="lst"><span class="vpill s-'+s+'">'+VST[s]+'</span><span class="tag">'+esc(srcLabel(l.src))+'</span></div><div class="hint">'+(l.stAt?'Status gesetzt am '+esc(fmtStamp(l.stAt)):'Noch kein Status gesetzt')+'</div></div></div>'+
+  '<div class="sect"><div class="sec"><span>Status</span></div><div class="vacts">'+acts+'</div><p class="hint">Nochmal tippen setzt zurück auf „Rückruf offen“.</p>'+term+'</div>'+
+  '<div class="contact">'+
+  '<div class="crow"><span style="color:var(--ink2)">'+ico.tel+'</span><div class="grow"><span class="k">Telefon</span><span class="v num">'+esc(l.phone||'nicht erfasst')+'</span></div>'+(telh?'<a href="tel:'+esc(telh)+'">Anrufen</a>':'')+'</div>'+
+  (l.phone2?'<div class="crow"><span style="width:22px;flex:none"></span><div class="grow"><span class="k">Weitere Nummer</span><span class="v num">'+esc(l.phone2)+'</span></div>'+(tel2?'<a href="tel:'+esc(tel2)+'">Anrufen</a>':'')+'</div>':'')+
+  (l.email?'<div class="crow"><span style="width:22px;flex:none"></span><div class="grow"><span class="k">E-Mail</span><span class="v">'+esc(l.email)+'</span></div><a href="mailto:'+esc(l.email)+'">Schreiben</a></div>':'')+
+  '<div class="crow"><span style="color:var(--ink2)">'+ico.pin+'</span><div class="grow"><span class="k">Adresse</span><span class="v">'+esc(l.addr||l.ort||'nicht erfasst')+'</span><span class="vlinks">'+links.map(function(x){return '<a href="'+x[1]+'" target="_blank" rel="noopener">'+x[0]+' ↗</a>'}).join('')+'</span></div></div>'+
+  '<div class="crow"><span style="width:22px;flex:none"></span><div class="grow"><span class="k">Anfahrt ab Mödling (geschätzt)</span><span class="v">'+esc(fmtKm(l))+'</span>'+(l.lat==null?'<button class="btn small" data-act="leadLocate" style="margin-top:6px">Position aus Adresse bestimmen</button>':'')+'</div></div>'+
+  '</div>'+
+  '<div class="sect"><div class="sec"><span>Notizen</span></div><div class="fld"><textarea id="lnote" data-change="leadNote" rows="4" placeholder="Gesprächsinhalt, Rückfragen, Besonderheiten">'+esc(l.notiz)+'</textarea><div class="hint" id="lnote-st">'+(l.notizAt?'Zuletzt gespeichert '+esc(fmtStamp(l.notizAt)):'Wird beim Verlassen des Feldes gespeichert')+'</div></div></div>'+
+  '<div class="sect"><div class="sec"><span>Angaben</span><button class="btn small" data-act="leadEdit">Bearbeiten</button></div><table class="kv">'+
+  '<tr><td>kWp</td><td><input id="lkwp" type="text" inputmode="decimal" data-change="leadKwp" value="'+(l.k!=null?esc(fmtK(l.k)):'')+'" placeholder="kWp" aria-label="Anlagengröße in kWp"><div class="hint">'+kNote+'</div></td></tr>'+
+  '<tr><td>Quelle</td><td><select id="lsrc" data-change="leadSrc" aria-label="Quelle">'+srcOpts+'</select></td></tr>'+
+  vrow('CRM-Stand',esc(l.last))+vrow('Eingetragen',esc(l.eingang))+vrow('Anrede',esc(l.anrede))+vrow('Personen',esc(l.personen))+vrow('Stromspeicher',esc(l.speicher))+vrow('Objekt',esc(l.objekt))+vrow('Ausrichtung',esc(l.ausrichtung))+
+  vrow('Dach',esc(l.dach))+vrow('Verbrauch',esc(l.verbrauch))+vrow('Wünsche',esc(l.wuensche))+vrow('Budget',esc(l.budget))+vrow('Zeitrahmen',esc(l.umsetzung))+vrow('Info',esc(l.info))+'</table></div>'+
+  '<div class="sect"><div class="sec"><span>Verlauf</span><span class="num">'+(l.log.length+l.hist.length)+'</span></div><ul class="lhist" id="lhist">'+histHtml(l)+'</ul></div>'+
+  (isOffice()?'<button class="btn danger wide" data-act="leadDelete">'+(ui.confirm==='ld'+l.id?'Wirklich löschen? Nochmal tippen':'Lead löschen')+'</button>':'')+
+  '</div>';
+  var nb=$('.dbody',d);if(nb&&st)nb.scrollTop=st;
+  var ta=$('#lnote');if(ta)ta.addEventListener('input',function(){var x=$('#lnote-st');if(x)x.textContent='Ungespeicherte Änderung – wird beim Verlassen des Feldes gespeichert'});
+}
+function histHtml(l){
+  var own=l.log.map(function(e){var who=e.by?first(person(e.by).name):(e.byName||'');return '<li><span class="hd">'+esc(fmtStamp(e.at))+(who?' · '+esc(who):'')+'</span>'+esc(e.text)+'</li>'}).join('');
+  var src=l.hist.length?'<li class="hsep">aus '+esc(srcLabel(l.src))+':</li>'+l.hist.map(function(x){return '<li class="hsrc">'+esc(x)+'</li>'}).join(''):'';
+  return own+src||'<li class="hint">Noch kein Verlauf.</li>';
+}
+function openLead(id){if(ui.sheetKind)closeSheet();ui.confirm=null;ui.lead=id;ui.detail=null;renderLead()}
+function logLead(id,text){mut('lead_log','up',{id:uuid(),lead_id:id,text:text,at:new Date().toISOString(),created_by:ME.id,by_name:null})}
+function setLeadStatus(id,s){
+  var l=lead(id);if(!l)return;
+  var next=l.st===s?'offen':s,row={id:id,status:next,status_at:new Date().toISOString()};
+  if(next!=='einplanen'||!VDATED.includes(l.st)){if(next!==l.st){row.termin=null;row.invite_at=null;row.invite_termin=null}}
+  mut('leads','up',row);logLead(id,'Status: '+VST[l.st]+' → '+VST[next]);
+  if(next==='einplanen'||next==='wiedervorlage')setTimeout(function(){var i=$('#ltermin');if(i&&!i.value)i.focus()},120);
+}
+function addMinutes(v,mins){var x=new Date(v);x.setMinutes(x.getMinutes()+mins);return iso(x)+'T'+pad(x.getHours())+':'+pad(x.getMinutes())}
+function outlookUrl(l){
+  var wv=l.st==='wiedervorlage',n=l.name.replace(/\s*\(.*\)\s*/,'').trim(),adr=String(l.addr||'').replace(/\s*\(.*?\)\s*/g,' ').trim();
+  var kontakt='KONTAKT\n'+n+'\nTelefon: '+(l.phone||'–')+'\nE-Mail: '+(l.email||'–')+'\nAdresse: '+(adr||'–');
+  var sig='\n\nLiebe Grüße\nIhr strom-macher Team\npv@strom-macher.at\n+43 664 11 09 721';
+  var p={
+    subject:wv?'Wiedervorlage – PV-Projekt nachfragen: '+n:'PV-Termin '+n,
+    body:wv?'Vielen Dank '+(l.anrede||n)+' für das nette Gespräch – wir haben uns einen Termin für ein erneutes Gespräch vorgemerkt.'+sig+'\n\n\n'+kontakt:kontakt+'\n\nTermin: Beratung und Vor-Ort-Besichtigung für Ihre Photovoltaikanlage.'+sig,
+    startdt:l.termin+':00',enddt:addMinutes(l.termin,wv?30:60)+':00',
+    location:wv?'Telefon '+(l.phone||''):adr+(l.phone?' · Tel. '+l.phone:'')
+  };
+  if(l.email)p.to=l.email;
+  return 'https://outlook.office.com/calendar/0/deeplink/compose?'+Object.keys(p).map(function(k){return k+'='+encodeURIComponent(p[k])}).join('&');
+}
+var vchange={
+  leadTermin:function(el){var l=lead(ui.lead);if(!l)return;var v=el.value||null;el.blur();if((v||'')===l.termin)return;mut('leads','up',{id:l.id,termin:v});logLead(l.id,(l.st==='wiedervorlage'?'Wiedervorlage':'Termin')+(v?' gesetzt: '+fmtTermin(v):' entfernt'))},
+  leadNote:function(el){var l=lead(ui.lead);if(!l)return;var t=String(el.value||'').replace(/\s+$/,'');if(t===l.notiz)return;var now=new Date().toISOString();
+    mut('leads','up',{id:l.id,notiz:t||null,notiz_at:t?now:null});logLead(l.id,t?'Notiz: '+t.replace(/\s+/g,' ').slice(0,200)+(t.length>200?'…':''):'Notiz gelöscht');var x=$('#lnote-st');if(x)x.textContent='Gespeichert'},
+  leadKwp:function(el){var l=lead(ui.lead);if(!l)return;var raw=String(el.value).trim(),n=parseFloat(raw.replace(',','.'));
+    var nv=(!raw||!isFinite(n)||n<=0)?null:Math.round(n*10)/10;if(nv!=null&&l.kEst!=null&&nv===l.kEst)nv=null;if(nv===l.kOv)return;
+    mut('leads','up',{id:l.id,kwp:nv});logLead(l.id,nv==null?'kWp zurück auf Vorschlag ('+fmtK(l.kEst)+')':'kWp geändert: '+fmtK(l.k)+' → '+fmtK(nv))},
+  leadSrc:function(el){var l=lead(ui.lead);if(!l||el.value===l.src)return;el.blur();mut('leads','up',{id:l.id,source:el.value});logLead(l.id,'Quelle: '+srcLabel(l.src)+' → '+srcLabel(el.value))}
+};
+
+/* Neuer Lead / Bearbeiten */
+var LF=[['lf_name','name','Name','text','Vor- und Nachname',1],['lf_anrede','anrede','Anrede','text','z. B. Frau Muster',1],['lf_phone','phone','Telefon','tel','',1],['lf_email','email','E-Mail','email','',1],
+  ['lf_addr','addr','Adresse','text','Straße Nr, PLZ Ort',1],['lf_ort','ort','Ort','text','',1],['lf_kwp','kwp_est','kWp geschätzt','text','z. B. 8',1],
+  ['lf_phone2','phone2','Weitere Nummer','tel','',0],['lf_objekt','objekt','Objekt / Dach','text','z. B. Einfamilienhaus, Satteldach Ziegel',0],['lf_aus','ausrichtung','Ausrichtung','text','',0],['lf_dach','dach','Dachfläche','text','',0],
+  ['lf_verbrauch','verbrauch','Verbrauch','text','z. B. 6.000 kWh/a',0],['lf_speicher','speicher','Stromspeicher','text','Ja / Nein / Unsicher',0],['lf_w','wuensche','Wünsche','text','Speicher, Wallbox, Notstrom …',0],
+  ['lf_bud','budget','Budget','text','',0],['lf_lz','umsetzung','Zeitrahmen','text','',0],['lf_p','personen','Personen im Haushalt','text','',0],['lf_info','info','Info','textarea','',0]];
+function sheetLeadForm(l){
+  vui.edit=l?l.id:null;vui.geo=l&&l.lat!=null?{lat:l.lat,lon:l.lon,km:l.km,min:l.min,addr:l.addr+'|'+l.ort}:null;
+  var src=l?l.src:'SM';
+  var f=function(x){var v=!l?'':x[1]==='kwp_est'?(l.kEst!=null?fmtK(l.kEst):''):(l[x[1]]||'');
+    var inp=x[3]==='textarea'?'<textarea id="'+x[0]+'" rows="3">'+esc(v)+'</textarea>':'<input id="'+x[0]+'" type="'+x[3]+'"'+(x[1]==='kwp_est'?' inputmode="decimal"':'')+' autocomplete="off" placeholder="'+esc(x[4])+'" value="'+esc(v)+'">';
+    return fld(x[0],x[2],inp)};
+  var body='<form class="form" id="frm" data-submit="saveLead" novalidate>'+
+    (l?'':'<p class="hint">Tipp: Im Textfeld die Mikrofon-Taste der Handy-Tastatur antippen und diktieren.</p>')+
+    LF.filter(function(x){return x[5]}).map(f).join('')+
+    '<div class="fld"><label>Quelle</label><div class="chips" id="lf_src">'+VSRC.map(function(x){return '<button type="button" class="chip'+(src===x[0]?' on':'')+'" data-act="lfSrc" data-v="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div></div>'+
+    '<div class="fld"><button type="button" class="btn wide" data-act="lfGeo">'+ico.pin+'Position aus Adresse bestimmen</button><div class="hint" id="lf_geo">'+(vui.geo?'Kartenposition vorhanden · ca. '+esc(fmtKm(vui.geo))+' ab Mödling':'Noch keine Kartenposition. Wird beim Speichern automatisch gesucht, wenn Empfang da ist.')+'</div></div>'+
+    '<details class="more"'+(l?' open':'')+'><summary>Weitere Angaben</summary><div class="form" style="margin-top:12px">'+LF.filter(function(x){return !x[5]}).map(f).join('')+'</div></details>'+
+    '<button class="btn main wide" type="submit" id="lf_save">'+(l?'Änderungen speichern':'Lead anlegen')+'</button></form>';
+  vui.src=src;
+  openSheet('leadForm',sheetShell(l?'Lead bearbeiten':'Neuer Lead',l?l.name:'',body,'90%'));
+  if(!l&&matchMedia('(hover:hover)').matches){var i=$('#lf_name');if(i)i.focus()}
+}
+async function geocode(addr){
+  var q=String(addr||'').replace(/\s*\(.*?\)\s*/g,' ').trim();if(!q)return null;
+  var r=await fetch('https://photon.komoot.io/api/?limit=1&lang=de&bbox=9.5,46.3,17.2,49.1&q='+encodeURIComponent(q+', Österreich'));
+  if(!r.ok)throw new Error('Adresssuche nicht erreichbar');
+  var j=await r.json(),ft=j&&j.features&&j.features[0];if(!ft)return null;
+  var c=ft.geometry.coordinates,p=ft.properties||{},d=kmFrom(c[1],c[0]);
+  return {lat:Math.round(c[1]*10000)/10000,lon:Math.round(c[0]*10000)/10000,km:d.km,min:d.min,label:[p.street&&(p.street+(p.housenumber?' '+p.housenumber:'')),[p.postcode,p.city||p.name].filter(Boolean).join(' ')].filter(Boolean).join(', ')};
+}
+async function lfGeo(){
+  var a=val('lf_addr'),o=val('lf_ort'),h=$('#lf_geo');if(!a&&!o){setErr('lf_addr','Bitte zuerst eine Adresse oder einen Ort eingeben.');return}setErr('lf_addr','');
+  if(!navigator.onLine){h.textContent='Kein Empfang – die Position wird später bestimmt.';return}
+  h.textContent='Wird gesucht …';
+  try{var g=await geocode(a||o)||(a&&o?await geocode(o):null);
+    if(!g){h.textContent='Adresse nicht gefunden. Bitte Schreibweise prüfen oder nur PLZ und Ort eingeben.';return}
+    vui.geo=Object.assign(g,{addr:a+'|'+o});h.textContent='Gefunden: '+(g.label||'Position')+' · ca. '+fmtKm(g)+' ab Mödling';
+  }catch(e){h.textContent='Adresssuche gerade nicht erreichbar. Der Lead kann trotzdem gespeichert werden.'}
+}
+async function submitLead(){
+  if(vui.busy)return;
+  var row={},l=vui.edit?lead(vui.edit):null;
+  LF.forEach(function(x){row[x[1]]=nz(val(x[0]))});
+  if(!row.name&&!row.phone){setErr('lf_name','Bitte mindestens Name oder Telefon angeben.');return}setErr('lf_name','');
+  var k=row.kwp_est!=null?parseFloat(String(row.kwp_est).replace(',','.')):NaN;row.kwp_est=isFinite(k)&&k>0?Math.round(k*10)/10:null;
+  row.source=vui.src||'SM';row.name=row.name||'Unbekannt';row.short=shortOf(row.name);
+  var addrKey=(row.addr||'')+'|'+(row.ort||'');
+  if((row.addr||row.ort)&&(!vui.geo||vui.geo.addr!==addrKey)&&navigator.onLine){
+    vui.busy=true;var b=$('#lf_save');if(b){b.disabled=true;b.textContent='Position wird bestimmt …'}
+    try{var g=await geocode(row.addr||row.ort)||(row.addr&&row.ort?await geocode(row.ort):null);vui.geo=g?Object.assign(g,{addr:addrKey}):null}catch(e){vui.geo=null}
+    vui.busy=false;
+  }else if(!(row.addr||row.ort))vui.geo=null;
+  var g2=vui.geo&&vui.geo.addr===addrKey?vui.geo:null;
+  row.lat=g2?g2.lat:null;row.lon=g2?g2.lon:null;row.km=g2?g2.km:null;row.min=g2?g2.min:null;
+  if(l){
+    var labels={};LF.forEach(function(x){labels[x[1]]=x[2]});
+    var map={name:'name',anrede:'anrede',phone:'phone',email:'email',addr:'addr',ort:'ort',kwp_est:'kEst',phone2:'phone2',objekt:'objekt',ausrichtung:'ausrichtung',dach:'dach',verbrauch:'verbrauch',speicher:'speicher',wuensche:'wuensche',budget:'budget',umsetzung:'umsetzung',personen:'personen',info:'info'};
+    var ch=Object.keys(map).filter(function(c){var a=l[map[c]],b=row[c];return String(a==null?'':a)!==String(b==null?'':b)}).map(function(c){return labels[c]});
+    if(row.source!==l.src)ch.push('Quelle');
+    if(l.lat!==row.lat||l.lon!==row.lon)ch.push('Kartenposition');
+    closeSheet();
+    if(!ch.length){toast('Keine Änderungen');return}
+    row.id=l.id;mut('leads','up',row);logLead(l.id,'Angaben geändert: '+ch.join(', '));toast('Gespeichert');
+    return;
+  }
+  var slug=String(row.name).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,30)||'lead';
+  row.id='n-'+slug+'-'+Date.now().toString(36);row.status='offen';row.eingang=new Date().toLocaleDateString('de-AT');row.src_hist=[];
+  row.created_at=new Date().toISOString();row.created_by=ME.id;
+  closeSheet();mut('leads','up',row);logLead(row.id,'Lead angelegt ('+srcLabel(row.source)+')');
+  toast(row.lat==null&&(row.addr||row.ort)?'Lead angelegt – Position wird bestimmt, sobald Empfang da ist':'Lead angelegt');
+  openLead(row.id);
+}
+async function leadLocate(){
+  var l=lead(ui.lead);if(!l)return;if(!navigator.onLine){toast('Kein Empfang – bitte später erneut versuchen');return}
+  try{var g=await geocode(l.addr||l.ort)||(l.addr&&l.ort?await geocode(l.ort):null);
+    if(!g){toast('Adresse nicht gefunden – bitte unter „Bearbeiten“ prüfen');return}
+    mut('leads','up',{id:l.id,lat:g.lat,lon:g.lon,km:g.km,min:g.min});logLead(l.id,'Kartenposition bestimmt ('+fmtKm(g)+')');toast('Position gefunden');
+  }catch(e){toast('Adresssuche gerade nicht erreichbar')}
+}
+/* Leads ohne Position nachträglich verorten, sobald Empfang da ist (z. B. offline angelegt) */
+var vgeoRunning=false;
+async function geoPending(){
+  if(vgeoRunning||!navigator.onLine||!S.leads)return;vgeoRunning=true;
+  try{var todo=S.leads.filter(function(l){return l.lat==null&&(l.addr||l.ort)&&!l.geoTried&&Date.now()-l.created<7*864e5}).slice(0,3);
+    for(var i=0;i<todo.length;i++){var l=todo[i];l.geoTried=true;try{var g=await geocode(l.addr||l.ort);if(g)mut('leads','up',{id:l.id,lat:g.lat,lon:g.lon,km:g.km,min:g.min})}catch(e){break}}
+  }finally{vgeoRunning=false}
+}
+
+/* Snapshot: Karte und Liste als A4-Bild */
+async function vSnapshot(btn){
+  var node=$('#vcap');if(!node)return;
+  btn.disabled=true;var lab=btn.textContent;btn.textContent='Bild wird erstellt …';
+  try{
+    await loadScript('vendor/html-to-image.min.js');
+    var hd=$('.vshot-h',node);if(hd)hd.hidden=false;
+    var bg=getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()||'#EDF1F0';
+    var raw=await htmlToImage.toCanvas(node,{pixelRatio:2,backgroundColor:bg,filter:function(n){return !(n.classList&&n.classList.contains('noshot'))}});
+    if(hd)hd.hidden=true;
+    var land=raw.width>raw.height*1.2,PW=land?3508:2480,PH=land?2480:3508,M=120;
+    var c=document.createElement('canvas');c.width=PW;c.height=PH;var g=c.getContext('2d');g.fillStyle='#ffffff';g.fillRect(0,0,PW,PH);
+    var sc=Math.min((PW-2*M)/raw.width,(PH-2*M)/raw.height),w=raw.width*sc,h=raw.height*sc;g.imageSmoothingQuality='high';g.drawImage(raw,(PW-w)/2,M,w,h);
+    var blob=await new Promise(function(res,rej){c.toBlob(function(b){b?res(b):rej(new Error('Bild leer'))},'image/png')});
+    var n=new Date();saveFile(blob,'PV-Lead-Karte_'+iso(n)+'_'+pad(n.getHours())+pad(n.getMinutes())+'.png','image/png');
+  }catch(e){toast('Snapshot fehlgeschlagen')}
+  finally{var h2=$('.vshot-h');if(h2)h2.hidden=true;btn.disabled=false;btn.textContent=lab}
+}
+
+Object.assign(actions,{
+  openLead:function(el){openLead(el.dataset.id)},
+  leadNew:function(){sheetLeadForm(null)},
+  leadEdit:function(){var l=lead(ui.lead);if(l)sheetLeadForm(l)},
+  leadStatus:function(el){setLeadStatus(ui.lead,el.dataset.v)},
+  leadOutlook:function(){var l=lead(ui.lead);if(!l)return;mut('leads','up',{id:l.id,invite_at:new Date().toISOString(),invite_termin:l.termin});
+    logLead(l.id,(l.st==='wiedervorlage'?'Wiedervorlage':'Termin')+' in Outlook geöffnet für '+fmtTermin(l.termin)+(l.email?' (Einladung an '+l.email+')':''))},
+  leadKwpReset:function(){var l=lead(ui.lead);if(!l||l.kOv==null)return;mut('leads','up',{id:l.id,kwp:null});logLead(l.id,'kWp zurück auf Vorschlag ('+fmtK(l.kEst)+')')},
+  leadLocate:leadLocate,
+  leadDelete:function(){
+    var l=lead(ui.lead);if(!l)return;
+    if(ui.confirm!=='ld'+l.id){ui.confirm='ld'+l.id;renderLead(true);return}
+    ui.confirm=null;ui.lead=null;renderLead();mut('leads','del',{id:l.id});toast('„'+l.name+'“ gelöscht');
+  },
+  lfSrc:function(el){vui.src=el.dataset.v;document.querySelectorAll('#lf_src .chip').forEach(function(b){b.classList.toggle('on',b===el)})},
+  lfGeo:lfGeo,
+  vPrism:function(){vui.prism=!vui.prism;vui.sig='';renderTab(false)},
+  vArch:function(){vui.arch=!vui.arch;vui.sig='';renderTab(false)},
+  vReset:function(){if(vui.resetZoom)vui.resetZoom();vui.zoom=null},
+  vSnap:function(el){vSnapshot(el)}
+});
+submits.saveLead=submitLead;
 
 /* ---------- Start ---------- */
 async function boot(){
