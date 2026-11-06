@@ -501,3 +501,21 @@ details.more summary{cursor:pointer;font-weight:600;font-size:15px;min-height:44
 #detail.flip{animation:bgIn .26s ease-out both}
 @keyframes bgIn{from{background-color:transparent}}
 @media (prefers-reduced-motion:reduce){#detail.flip{animation-name:fade}}
+
+/* Vertrieb: Website-Anfragen – Eingang, Spartenfilter, Spam */
+.vinbox{background:var(--paper);border:2px solid var(--ink);border-radius:20px;padding:12px 12px 4px;margin-bottom:14px}
+.vinbox .sec{margin-bottom:8px}
+.vin{border-top:1px solid var(--hair);padding:10px 0}
+.vinbox .vin:first-of-type{border-top:0;padding-top:2px}
+.vin-t{display:block;width:100%;text-align:left;background:none;border:0;padding:0;color:inherit;font:inherit}
+.vin-t b{display:block;font-weight:600;font-size:15px}
+.vin-t span{display:block;font-size:13px;color:var(--ink2)}
+.vin-t .vin-m{margin-top:3px;color:var(--ink);line-height:1.35}
+.vin-a{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.vin-a .chip{min-height:38px;font-size:14px;padding:0 12px}
+.nogap .vin-a .chip+.chip{margin-left:6px}
+.chip.ghost{background:transparent;border-style:dashed}
+.vtools .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.vsep{flex:none;width:1px;align-self:stretch;margin:6px 2px;background:var(--hair)}
+.vassign .vin-a{margin-top:0}
+.newb{font-weight:600;color:inherit}
