@@ -1296,11 +1296,11 @@ function remind(){
 }
 
 /* ---------- Vertrieb: PV-Leads mit Karte (übernommen aus der PV-Lead-Karte) ---------- */
-var VST={eingang:'Eingang',spam:'Spam',offen:'Rückruf offen',nicht_erreicht:'Nicht erreicht',einplanen:'Eingeplant',wiedervorlage:'Wiedervorlage',angeboten:'Angeboten',verworfen:'Verworfen',beauftragt:'Beauftragt',verloren:'Verloren'};
-var VORDER=['offen','nicht_erreicht','einplanen','angeboten','wiedervorlage','verworfen','beauftragt','verloren'];
+var VST={eingang:'Eingang',spam:'Spam',offen:'Rückruf offen',nicht_erreicht:'Nicht erreicht',einplanen:'Eingeplant',besichtigt:'Besichtigt',wiedervorlage:'Wiedervorlage',angeboten:'Angeboten',verworfen:'Verworfen',beauftragt:'Beauftragt',verloren:'Verloren'};
+var VORDER=['offen','nicht_erreicht','einplanen','besichtigt','angeboten','wiedervorlage','verworfen','beauftragt','verloren'];
 var VDATED=['einplanen','wiedervorlage'];
 var VGONE=['verworfen','beauftragt','verloren'];
-var VBTN=[['nicht_erreicht','Nicht erreicht'],['einplanen','Einplanen'],['wiedervorlage','Wiedervorlage'],['angeboten','Angeboten'],['beauftragt','Beauftragt'],['verloren','Verloren'],['verworfen','Verwerfen']];
+var VBTN=[['nicht_erreicht','Nicht erreicht'],['einplanen','Einplanen'],['besichtigt','Besichtigt'],['wiedervorlage','Wiedervorlage'],['angeboten','Angeboten'],['beauftragt','Beauftragt'],['verloren','Verloren'],['verworfen','Verwerfen']];
 var VSRC=[['Tuny','tunyCRM'],['SM','solarmaker'],['Empf','Empfehlung'],['Web','Website']];
 var VSP=[['pv','Photovoltaik'],['verteiler','Verteiler'],['elektro','Hauselektrik'],['stoerung','Störung'],['sonstiges','Sonstiges']];
 var SPC={verteiler:'#0B5E8E',elektro:'#B98600',stoerung:'#B98600',sonstiges:'#59636F'};

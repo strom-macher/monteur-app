@@ -519,3 +519,10 @@ details.more summary{cursor:pointer;font-weight:600;font-size:15px;min-height:44
 .vsep{flex:none;width:1px;align-self:stretch;margin:6px 2px;background:var(--hair)}
 .vassign .vin-a{margin-top:0}
 .newb{font-weight:600;color:inherit}
+
+/* Status Besichtigt (Türkis, zwischen Eingeplant und Angeboten) */
+.vgrp .sec.g-besichtigt{color:#178C80}
+.lcard.s-besichtigt{border-color:#4FC3B5}
+.vpill.s-besichtigt{background:#4FC3B5;color:#101514}
+.vst.s-besichtigt .dot{background:#4FC3B5}
+.vst.s-besichtigt[aria-pressed=true]{background:color-mix(in srgb,#4FC3B5 45%,var(--paper))}
