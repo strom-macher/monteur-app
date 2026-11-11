@@ -254,6 +254,7 @@ async function tryRefresh(){
   }catch(e){}
 }
 var ico={
+  cal:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
   search:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>',
   x:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg>',
   back:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
@@ -325,11 +326,12 @@ function taskRow(t,o){
   var sub=[];
   if(pn)sub.push('<span>'+esc(pn.label)+'</span>');
   if(t.due)sub.push('<span class="'+(late?'late':'')+'">'+esc(fmtDate(t.due,t.time))+'</span>');
-  if(o.who&&t.assignee)sub.push('<span>'+esc(first(person(t.assignee).name))+'</span>');
+  var mine=!o.restore&&!t.done&&t.assignee===ME.id;
+  if(o.who&&t.assignee)sub.push(mine?'<span class="me">für dich</span>':'<span>'+esc(first(person(t.assignee).name))+'</span>');
   var pend=!!ui.pend[t.id];
   var right=o.restore?'<button class="btn small" data-act="restoreTask" data-id="'+t.id+'">Wieder aktiv</button>':'';
   var cb=o.restore?'<span class="chk" style="background:var(--tab)">'+ico.check+'</span>':'<button class="chk" data-act="chk" data-id="'+t.id+'" aria-label="Aufgabe abhaken: '+esc(t.name)+'">'+ico.check+'</button>';
-  return '<div class="task'+((pend||t.done)?' is-done':'')+'" data-tid="'+t.id+'">'+cb+
+  return '<div class="task'+((pend||t.done)?' is-done':'')+(mine?' mine':'')+'" data-tid="'+t.id+'">'+cb+
     '<div class="tt"><span class="name">'+esc(t.name)+'</span><div class="sub">'+sub.join('<span aria-hidden="true">·</span>')+'</div></div>'+right+'</div>';
 }
 function tabAufgaben(){
@@ -470,6 +472,7 @@ function afterChange(){
   if(ui.view==='app'){
     refresh(true);
     if(ui.sheetKind==='tasksAll')sheetTasksAllKeep();
+    else if(ui.sheetKind==='cal')calKeep();
     else if(ui.sheetKind==='matDetail'&&ui.qrPending){var m=mat(ui.curMat);if(m&&m.qr)keepRender(function(){sheetMatDetail(ui.curMat)})}
   }
 }
@@ -1019,9 +1022,10 @@ function sheetUser(){
     '<div><div class="sec" style="margin-bottom:6px">Abgleich</div><p class="hint" style="font-size:14px;color:var(--ink)">'+(navigator.onLine?'Verbunden':'Kein Empfang')+' · zuletzt abgeglichen '+esc(ago(sync_.last||C.pulledAt))+'<br>'+(n?n+' Einträge warten auf die Übertragung.':'Alles übertragen.')+'</p>'+
     '<button class="btn wide" data-act="syncNow" style="margin-top:8px">Jetzt abgleichen</button></div>'+
     (off?'<div><div class="sec" style="margin-bottom:8px">Büro</div><div class="form" style="gap:10px"><button class="btn main wide" data-act="exportMenu">Export &amp; Ausdrucke</button><button class="btn wide" data-act="team">Team verwalten</button></div><p class="hint" style="margin-top:6px">Der Export enthält Projekte, Stunden, Materialbuchungen, Lager, Lieferungen und Aufgaben.</p></div>':'')+
+    '<div><div class="sec" style="margin-bottom:6px">Tägliche Übersicht</div><div id="pushBox"><p class="hint">Wird geprüft …</p></div></div>'+
     install+
     '<div><button class="btn '+(ui.confirm==='logout'?'danger':'')+' wide" data-act="logout">'+(ui.confirm==='logout'?(n?'Es warten noch '+n+' Einträge – trotzdem abmelden?':'Wirklich abmelden?'):'Abmelden')+'</button><p class="hint" style="margin-top:8px">Angemeldet als '+esc(ME.name)+' · '+(off?'Büro und Lager':'Monteur')+' · Version '+esc(CFG.version||'1')+'</p></div></div>';
-  openSheet('user',sheetShell(ME.name,'Einstellungen',body,'92%'));
+  openSheet('user',sheetShell(ME.name,'Einstellungen',body,'92%'));renderPushBox();
   if(off)loadScript('vendor/xlsx.full.min.js').catch(function(){});
 }
 function sheetTeam(){
@@ -1033,6 +1037,100 @@ function sheetTeam(){
   var body='<div class="form" style="gap:14px"><div>'+rows+'</div><p class="hint">Neue Mitarbeiter lädst du im Supabase-Dashboard unter „Authentication → Users“ per „Invite user“ ein. Nach der ersten Anmeldung erscheinen sie hier und du legst die Rolle fest. Gesperrte Personen sehen keine Daten mehr.</p></div>';
   openSheet('team',sheetShell('Team','Zugänge und Rollen',body,'92%'));
 }
+
+
+/* ---------- Kalender (Wochenansicht aus Projekt-, Lead- und Aufgabenterminen) ---------- */
+var WD=['Mo','Di','Mi','Do','Fr','Sa','So'];
+function monday(off){var d=new Date();d.setHours(12,0,0,0);var w=(d.getDay()+6)%7;d.setDate(d.getDate()-w+7*(off||0));return d}
+function kw(d){var t=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));var n=t.getUTCDay()||7;t.setUTCDate(t.getUTCDate()+4-n);var y=new Date(Date.UTC(t.getUTCFullYear(),0,1));return Math.ceil(((t-y)/864e5+1)/7)}
+function calItems(day){
+  var out=[];
+  activeProjects().forEach(function(p){if(p.termin===day)out.push({k:'p',t:'',title:p.name,sub:p.addr,id:p.id})});
+  (S.leads||[]).forEach(function(l){
+    if(!l.termin||VDATED.indexOf(l.st)<0)return;var d=String(l.termin).slice(0,10);if(d!==day)return;
+    out.push({k:l.st==='wiedervorlage'?'w':'l',t:String(l.termin).slice(11,16),title:(l.st==='wiedervorlage'?'Wiedervorlage: ':'Besichtigung: ')+l.name,sub:l.addr||l.ort||'',id:l.id});
+  });
+  S.tasks.forEach(function(t){if(t.done||t.due!==day)return;var p=t.project?proj(t.project):null;
+    out.push({k:'t',t:t.time?String(t.time).slice(0,5):'',title:t.name,sub:[p?p.name:'',t.assignee?first(person(t.assignee).name):''].filter(Boolean).join(' · '),id:p?p.id:'',mine:t.assignee===ME.id,late:day<TODAY()})});
+  return out.sort(function(a,b){return (a.t||'99')<(b.t||'99')?-1:(a.t||'99')>(b.t||'99')?1:0});
+}
+function calRow(x){
+  var act=x.k==='p'||(x.k==='t'&&x.id)?'calProj':(x.k==='l'||x.k==='w')?'calLead':'';
+  var tag=x.k==='t'?(x.mine?'<span class="cmine">für dich</span>':''):'';
+  return '<button class="citem k-'+x.k+(x.late?' late':'')+(x.mine?' mine':'')+'"'+(act?' data-act="'+act+'" data-id="'+esc(x.id)+'"':' disabled')+'><span class="cbar"></span><span class="ctime num">'+esc(x.t||'')+'</span><span class="grow"><span class="t">'+esc(x.title)+'</span>'+(x.sub?'<span class="s">'+esc(x.sub)+'</span>':'')+'</span>'+tag+'</button>';
+}
+function calHtml(){
+  var m=monday(ui.calW||0),today=TODAY(),days=[];
+  for(var i=0;i<7;i++){var d=new Date(m);d.setDate(m.getDate()+i);days.push(d)}
+  var strip=days.map(function(d,i){var k=iso(d),n=calItems(k).length;return '<button class="cday'+(k===today?' today':'')+(k===ui.calSel?' on':'')+'" data-act="calDay" data-v="'+k+'"><small>'+WD[i]+'</small><b class="num">'+d.getDate()+'</b><i>'+(n?'<em></em>':'')+'</i></button>'}).join('');
+  var late=(ui.calW||0)===0?S.tasks.filter(function(t){return !t.done&&t.due&&t.due<today}).sort(function(a,b){return a.due<b.due?-1:1}):[];
+  var lateHtml=late.length?'<div class="cgrp"><div class="sec cred"><span>Überfällig</span><span class="num">'+late.length+'</span></div>'+late.map(function(t){var p=t.project?proj(t.project):null;return calRow({k:'t',t:'',title:t.name,sub:[fmtDate(t.due),p?p.name:'',t.assignee?first(person(t.assignee).name):''].filter(Boolean).join(' · '),id:p?p.id:'',mine:t.assignee===ME.id,late:true})}).join('')+'</div>':'';
+  var list=days.map(function(d,i){var k=iso(d),it=calItems(k);if(late.length&&k<today)it=it.filter(function(x){return x.k!=='t'});if(ui.calSel&&ui.calSel!==k)return '';
+    return '<div class="cgrp" id="cd-'+k+'"><div class="sec'+(k===today?' ctoday':'')+'"><span>'+WD[i]+', '+d.getDate()+'. '+d.toLocaleDateString('de-AT',{month:'long'})+(k===today?' · Heute':'')+'</span></div>'+(it.length?it.map(calRow).join(''):'<p class="hint cempty">Nichts eingetragen.</p>')+'</div>'}).join('');
+  var label='KW '+kw(m)+' · '+m.getDate()+'.'+(m.getMonth()+1)+'. – '+days[6].getDate()+'.'+(days[6].getMonth()+1)+'.';
+  return '<div class="form cal" style="gap:12px"><div class="cnav"><button class="btn small" data-act="calW" data-v="-1" aria-label="Vorige Woche">‹</button><b>'+label+'</b><button class="btn small" data-act="calW" data-v="1" aria-label="Nächste Woche">›</button></div>'+
+    '<div class="cstrip">'+strip+'</div>'+((ui.calW||0)!==0||ui.calSel?'<button class="chip" data-act="calToday" style="align-self:center">Zurück zu heute</button>':'')+
+    lateHtml+list+
+    '<div class="cleg"><span><i class="k-p"></i>Projekt</span><span><i class="k-l"></i>Besichtigung</span><span><i class="k-w"></i>Wiedervorlage</span><span><i class="k-t"></i>Aufgabe</span></div></div>';
+}
+function sheetCal(){openSheet('cal',sheetShell('Kalender','Termine aus Projekten, Vertrieb und Aufgaben','<div id="calBody">'+calHtml()+'</div>','94%'))}
+function calKeep(){var b=$('#calBody');if(b)b.innerHTML=calHtml()}
+
+
+/* ---------- Push-Benachrichtigungen (tägliche Übersicht werktags 8:00) ---------- */
+var PUSH_OK=('serviceWorker' in navigator)&&('PushManager' in window)&&('Notification' in window);
+function b64u(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var r=atob(s),u=new Uint8Array(r.length);for(var i=0;i<r.length;i++)u[i]=r.charCodeAt(i);return u}
+function swReady(){return Promise.race([navigator.serviceWorker.ready,new Promise(function(_,rej){setTimeout(function(){rej(new Error('sw'))},4000)})])}
+async function pushSub(){try{var reg=await swReady();return await reg.pushManager.getSubscription()}catch(e){return null}}
+async function pushState(){
+  if(isIOS&&!standalone)return 'ios';
+  if(!PUSH_OK)return 'nope';
+  if(Notification.permission==='denied')return 'denied';
+  var sub=await pushSub();return sub&&Notification.permission==='granted'?'on':'off';
+}
+async function pushEnable(){
+  if(!PUSH_OK){toast('Dieses Gerät unterstützt keine Benachrichtigungen.');return false}
+  var perm=await Notification.requestPermission();
+  if(perm!=='granted'){toast('Benachrichtigungen wurden nicht erlaubt.');return false}
+  try{
+    var kr=await fetch(CFG.url+'/functions/v1/briefing?op=key');var key=(await kr.json()).key;
+    var reg=await swReady();
+    var sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(key)});
+    var j=sub.toJSON();
+    await sb.from('push_abos').delete().eq('endpoint',j.endpoint);
+    var r=await sb.from('push_abos').insert({endpoint:j.endpoint,p256dh:j.keys.p256dh,auth:j.keys.auth,ua:navigator.userAgent.slice(0,200)});
+    if(r.error)throw r.error;
+    toast('Aktiviert – werktags um 8:00 kommt deine Übersicht.');return true;
+  }catch(e){toast('Aktivieren hat nicht geklappt. Bitte mit Empfang nochmal versuchen.');return false}
+}
+async function pushDisable(){
+  var sub=await pushSub();if(!sub)return;
+  try{await sb.from('push_abos').delete().eq('endpoint',sub.endpoint)}catch(e){}
+  try{await sub.unsubscribe()}catch(e){}
+  toast('Benachrichtigungen ausgeschaltet');
+}
+async function pushTest(){
+  try{var se=(await sb.auth.getSession()).data.session;
+    var r=await fetch(CFG.url+'/functions/v1/briefing',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(se?se.access_token:'')},body:JSON.stringify({op:'test'})});
+    var j=await r.json();toast(j.ok&&j.res&&j.res.length?'Test-Nachricht ist unterwegs.':'Kein Gerät angemeldet – bitte zuerst aktivieren.');
+  }catch(e){toast('Test hat nicht geklappt.')}
+}
+async function renderPushBox(){
+  var b=$('#pushBox');if(!b)return;var st=await pushState();
+  var txt={ios:'Am iPhone gehen Benachrichtigungen nur, wenn die App über „Teilen → Zum Home-Bildschirm“ installiert ist (ab iOS 16.4). Danach hier aktivieren.',
+    nope:'Dieses Gerät oder dieser Browser unterstützt keine Benachrichtigungen. Die Übersicht siehst du beim Öffnen der App unter Aufgaben und im Kalender.',
+    denied:'Benachrichtigungen sind für die App blockiert. Du kannst sie in den Einstellungen des Handys bzw. Browsers für diese Seite wieder erlauben.',
+    on:'Aktiv auf diesem Gerät. Werktags um 8:00 kommt deine Übersicht: deine Aufgaben, offene Aufgaben im Team und die Termine des Tages.',
+    off:'Werktags um 8:00 eine kurze Nachricht mit deinen Aufgaben, den offenen Aufgaben im Team und den Terminen des Tages.'}[st];
+  b.innerHTML='<p class="hint" style="font-size:14px;color:var(--ink)">'+txt+'</p>'+
+    (st==='off'?'<button class="btn main wide" data-act="pushOn" style="margin-top:8px">Benachrichtigungen aktivieren</button>':'')+
+    (st==='on'?'<div class="row2" style="margin-top:8px"><button class="btn" data-act="pushTest">Test senden</button><button class="btn" data-act="pushOff">Ausschalten</button></div>':'');
+}
+function pushHint(){
+  try{if(!PUSH_OK||(isIOS&&!standalone)||Notification.permission!=='default'||localStorage.getItem('sm-push-hint'))return ''}catch(e){return ''}
+  return '<div class="phint rise" style="--i:4"><span>'+ico.bolt+'</span><div class="grow"><b>Tägliche Übersicht aufs Handy</b><small>Werktags um 8:00: deine Aufgaben und die Termine des Tages.</small></div><button class="btn small main" data-act="pushOn">Aktivieren</button><button class="x" data-act="pushLater" aria-label="Später">'+ico.x+'</button></div>';
+}
+if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',function(e){if(e.data&&e.data.go==='aufgaben'&&ME){setTab('aufgaben')}});
 
 /* ---------- Aktionen ---------- */
 function setTab(t){
@@ -1060,6 +1158,16 @@ var actions={
   tab:function(el){setTab(el.dataset.tab)},
   home:function(){setTab('start')},
   user:function(){ui.confirm=null;sheetUser()},
+  pushOn:async function(el){el.disabled=true;await pushEnable();try{localStorage.setItem('sm-push-hint','1')}catch(e){}renderPushBox();if(ui.tab==='start')renderTab(false)},
+  pushOff:async function(){await pushDisable();renderPushBox()},
+  pushTest:function(){pushTest()},
+  pushLater:function(){try{localStorage.setItem('sm-push-hint','1')}catch(e){}var h=$('.phint');if(h)h.remove()},
+  cal:function(){ui.calW=0;ui.calSel=null;sheetCal()},
+  calW:function(el){ui.calW=(ui.calW||0)+Number(el.dataset.v);ui.calSel=null;calKeep()},
+  calDay:function(el){ui.calSel=ui.calSel===el.dataset.v?null:el.dataset.v;calKeep()},
+  calToday:function(){ui.calW=0;ui.calSel=null;calKeep()},
+  calProj:function(el){closeSheet();ui.lead=null;ui.detail=el.dataset.id;renderDetail()},
+  calLead:function(el){closeSheet();openLead(el.dataset.id)},
   closeSheet:closeSheet,
   addTask:function(el){sheetTaskNew(el.dataset.pid||null)},
   allTasks:function(){ui.tm='active';sheetTasksAll()},
@@ -1280,7 +1388,7 @@ function route(){
 }
 function showApp(){
   ui.view='app';$('#auth').hidden=true;build();
-  if(!ui.started){ui.started=true;ui.tab='start';ui.seen={start:true};var hm=String(location.hash||'').match(/lead=([^&]+)/);if(hm){ui.pendingLead=decodeURIComponent(hm[1]);try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}}}
+  if(!ui.started){ui.started=true;ui.tab='start';ui.seen={start:true};if(/^#aufgaben/.test(location.hash||'')){ui.tab='aufgaben';ui.seen.aufgaben=true;try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}}var hm=String(location.hash||'').match(/lead=([^&]+)/);if(hm){ui.pendingLead=decodeURIComponent(hm[1]);try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}}}
   renderHeader();renderTab(true);renderBubbles();
   if(!tryPendingLead())remind();
 }
@@ -1368,7 +1476,7 @@ function tabStart(){
     '<div class="hbtns">'+
     '<button class="hbtn vbtn rise" style="--i:2" data-act="tab" data-tab="vertrieb"><span>Vertrieb<em>Leads · Karte · Termine</em></span><small>'+(inb?'<b class="newb">'+inb+(inb===1?' neue Anfrage':' neue Anfragen')+'</b><br>':'')+open+(open===1?' Rückruf offen':' Rückrufe offen')+'<br>'+soon+(soon===1?' Termin':' Termine')+' in 7 Tagen</small></button>'+
     '<button class="hbtn bbtn rise" style="--i:3" data-act="tab" data-tab="aufgaben"><span><i class="sq3" aria-hidden="true"><b></b><b></b><b></b></i>Betrieb<em>Aufgaben · Lager · Projekte</em></span><small>'+tasks+' Aufgaben offen<br>'+heute+(heute===1?' Termin heute':' Termine heute')+'</small></button>'+
-    '</div></div>';
+    pushHint()+'</div></div>';
 }
 
 /* Vertrieb: Übersicht */

@@ -1,5 +1,5 @@
 /* strom-macher Service Worker: App-Dateien offline verfügbar halten */
-var V='sm-v9';
+var V='sm-v10';
 var SHELL=['./','index.html','app.css','app.js','config.js','manifest.webmanifest',
   'vendor/supabase.js','vendor/qrcode.js','vendor/html5-qrcode.min.js','vendor/xlsx.full.min.js','vendor/exceljs.min.js',
   'vendor/d3.min.js','vendor/topojson-client.min.js','vendor/leadmap-geo.js','vendor/html-to-image.min.js',
@@ -40,4 +40,17 @@ self.addEventListener('fetch',function(e){
       });
     }));
   }
+});
+
+/* Push: tägliche Übersicht anzeigen, Tipp öffnet die App bei den Aufgaben */
+self.addEventListener('push',function(e){
+  var d={};try{d=e.data?e.data.json():{}}catch(x){d={body:e.data?e.data.text():''}}
+  e.waitUntil(self.registration.showNotification(d.title||'strom-macher',{body:d.body||'',icon:'icons/icon-192.png',badge:'icons/icon-192.png',tag:d.tag||'briefing',data:{url:d.url||'./#aufgaben'}}));
+});
+self.addEventListener('notificationclick',function(e){
+  e.notification.close();var url=(e.notification.data&&e.notification.data.url)||'./#aufgaben';
+  e.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(function(cs){
+    for(var i=0;i<cs.length;i++){if('focus' in cs[i]){cs[i].postMessage({go:'aufgaben'});return cs[i].focus()}}
+    return self.clients.openWindow(url);
+  }));
 });
