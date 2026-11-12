@@ -332,7 +332,7 @@ function taskRow(t,o){
   var right=o.restore?'<button class="btn small" data-act="restoreTask" data-id="'+t.id+'">Wieder aktiv</button>':'';
   var cb=o.restore?'<span class="chk" style="background:var(--tab)">'+ico.check+'</span>':'<button class="chk" data-act="chk" data-id="'+t.id+'" aria-label="Aufgabe abhaken: '+esc(t.name)+'">'+ico.check+'</button>';
   return '<div class="task'+((pend||t.done)?' is-done':'')+(mine?' mine':'')+'" data-tid="'+t.id+'">'+cb+
-    '<div class="tt"><span class="name">'+esc(t.name)+'</span><div class="sub">'+sub.join('<span aria-hidden="true">·</span>')+'</div></div>'+right+'</div>';
+    (o.restore||t.done?'<div class="tt">':'<button type="button" class="tt" data-act="editTask" data-id="'+t.id+'" aria-label="Aufgabe bearbeiten: '+esc(t.name)+'">')+'<span class="name">'+esc(t.name)+'</span><span class="sub">'+sub.join('<span aria-hidden="true">·</span>')+'</span>'+(o.restore||t.done?'</div>':'</button>')+right+'</div>';
 }
 function tabAufgaben(){
   var act=S.tasks.filter(function(t){return !t.done}).sort(function(a,b){return b.created-a.created});
@@ -507,20 +507,35 @@ function projOptions(q,sel,max){
   if(sel&&!list.some(function(p){return p.id===sel})){var sp=proj(sel);if(sp)list.unshift(sp)}
   return '<option value="">Kein Projekt</option>'+list.map(function(p){return '<option value="'+p.id+'"'+(p.id===sel?' selected':'')+'>'+esc(p.name)+' · '+esc(city(p.addr))+'</option>'}).join('')+(cut?'<option disabled>… weitere mit der Suche eingrenzen</option>':'');
 }
-function sheetTaskNew(pid){
-  var opts=PEOPLE.map(function(p){return '<option value="'+p.id+'"'+(p.id===ME.id?' selected':'')+'>'+esc(p.name)+'</option>'}).join('');
+function sheetTaskNew(pid,t){
+  ui.editTask=t?t.id:null;if(t)pid=t.project;
+  var who=t?(t.assignee||ME.id):ME.id;
+  var ppl=PEOPLE.slice();if(t&&t.assignee&&!ppl.some(function(p){return p.id===t.assignee}))ppl.push(person(t.assignee));
+  var opts=ppl.map(function(p){return '<option value="'+p.id+'"'+(p.id===who?' selected':'')+'>'+esc(p.name)+'</option>'}).join('');
   var big=activeProjects().length>25;
+  var canDel=t&&(isOffice()||t.by===ME.id);
   var body='<form class="form" id="frm" data-submit="saveTask" novalidate>'+
-    fld('tn','Name der Aufgabe','<input id="tn" type="text" autocomplete="off" placeholder="z. B. Zählerkasten fotografieren">')+
+    fld('tn','Name der Aufgabe','<input id="tn" type="text" autocomplete="off" placeholder="z. B. Zählerkasten fotografieren" value="'+(t?esc(t.name):'')+'">')+
     fld('ta','Bearbeiter','<select id="ta">'+opts+'</select>')+
     fld('tp','Projekt',(big&&!pid?'<input id="tpq" type="search" data-filter="tp" placeholder="Projekt suchen" autocomplete="off" aria-label="Projekt suchen" style="margin-bottom:6px">':'')+'<select id="tp">'+projOptions('',pid,60)+'</select>')+
     '<div class="fld"><label for="td">Termin</label><div class="chips" style="margin-bottom:2px"><button type="button" class="chip" data-act="setDate" data-v="0">Heute</button><button type="button" class="chip" data-act="setDate" data-v="1">Morgen</button><button type="button" class="chip" data-act="setDate" data-v="7">In 7 Tagen</button><button type="button" class="chip" data-act="setDate" data-v="">Ohne</button></div>'+
-    '<div class="grid2"><input id="td" type="date" aria-label="Datum"><input id="tt" type="time" aria-label="Uhrzeit"></div></div>'+
-    '<button class="btn main wide" type="submit">Aufgabe anlegen</button></form>';
-  openSheet('taskNew',sheetShell('Neue Aufgabe','',body,'92%'));
+    '<div class="grid2"><input id="td" type="date" aria-label="Datum" value="'+(t&&t.due?esc(t.due):'')+'"><input id="tt" type="time" aria-label="Uhrzeit" value="'+(t&&t.time?esc(String(t.time).slice(0,5)):'')+'"></div></div>'+
+    '<button class="btn main wide" type="submit">'+(t?'Änderungen speichern':'Aufgabe anlegen')+'</button>'+
+    (t?'<p class="hint">Angelegt '+esc(fmtTs(t.created))+(t.by?' von '+esc(first(person(t.by).name)):'')+'</p>':'')+
+    (canDel?'<button class="btn danger wide" type="button" data-act="delTask" data-id="'+t.id+'">'+(ui.confirm==='dt'+t.id?'Wirklich löschen? Nochmal tippen':'Aufgabe löschen')+'</button>':'')+
+    '</form>';
+  openSheet('taskNew',sheetShell(t?'Aufgabe bearbeiten':'Neue Aufgabe','',body,'92%'));
 }
 function submitTask(){
   var n=val('tn');if(!n){setErr('tn','Bitte einen Namen eingeben.');return}setErr('tn','');
+  if(ui.editTask){
+    var old=S.tasks.filter(function(x){return x.id===ui.editTask})[0];ui.editTask=null;closeSheet();if(!old)return;
+    var row={id:old.id,name:n,project_id:val('tp')||null,assignee:val('ta')||old.assignee||ME.id,due:val('td')||null,due_time:val('tt')||null};
+    var same=row.name===old.name&&row.project_id===(old.project||null)&&row.assignee===(old.assignee||ME.id)&&row.due===(old.due||null)&&(row.due_time||'')===String(old.time||'').slice(0,5);
+    if(same){toast('Keine Änderungen');return}
+    mut('tasks','up',row);
+    toast(row.assignee!==old.assignee&&row.assignee!==ME.id?'Gespeichert – jetzt bei '+first(person(row.assignee).name):'Aufgabe gespeichert');return;
+  }
   var t={id:uuid(),name:n,project_id:val('tp')||null,assignee:val('ta')||ME.id,due:val('td')||null,due_time:val('tt')||null,done:false,done_at:null,created_by:ME.id,created_at:new Date().toISOString()};
   closeSheet();mut('tasks','up',t);
   toast(t.assignee!==ME.id?'Aufgabe angelegt für '+first(person(t.assignee).name):'Aufgabe angelegt');
@@ -1170,6 +1185,12 @@ var actions={
   calLead:function(el){closeSheet();openLead(el.dataset.id)},
   closeSheet:closeSheet,
   addTask:function(el){sheetTaskNew(el.dataset.pid||null)},
+  editTask:function(el){var t=S.tasks.filter(function(x){return x.id===el.dataset.id})[0];if(!t)return;ui.confirm=null;var was=!!ui.sheetKind;if(was)closeSheet();setTimeout(function(){sheetTaskNew(null,t)},was?180:0)},
+  delTask:function(el){
+    var id=el.dataset.id,t=S.tasks.filter(function(x){return x.id===id})[0];if(!t)return;
+    if(ui.confirm!=='dt'+id){ui.confirm='dt'+id;el.textContent='Wirklich löschen? Nochmal tippen';return}
+    ui.confirm=null;ui.editTask=null;closeSheet();mut('tasks','del',{id:id});toast('Aufgabe gelöscht');
+  },
   allTasks:function(){ui.tm='active';sheetTasksAll()},
   tm:function(el){ui.tm=el.dataset.v;sheetTasksAllKeep()},
   tf:function(el){ui.tf=el.dataset.v;sheetTasksAllKeep()},

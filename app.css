@@ -576,3 +576,9 @@ details.more summary{cursor:pointer;font-weight:600;font-size:15px;min-height:44
 .phint small{display:block;font-size:12.5px;color:var(--ink2);line-height:1.3}
 .phint .x{flex:none}
 .nogap .phint>*+*{margin-left:10px}
+
+/* Aufgabe antippen = bearbeiten */
+button.tt{display:block;background:none;border:0;padding:4px 0;margin:0;text-align:left;color:inherit;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button.tt .name{display:inline}
+button.tt .sub{display:flex}
+@media (hover:hover) and (pointer:fine){button.tt:hover .name{text-decoration:underline;text-decoration-color:var(--hair);text-underline-offset:3px}}
