@@ -1430,7 +1430,7 @@ var VORDER=['offen','nicht_erreicht','einplanen','besichtigt','angeboten','wiede
 var VDATED=['einplanen','wiedervorlage'];
 var VGONE=['verworfen','beauftragt','verloren'];
 var VBTN=[['nicht_erreicht','Nicht erreicht'],['einplanen','Einplanen'],['besichtigt','Besichtigt'],['wiedervorlage','Wiedervorlage'],['angeboten','Angeboten'],['beauftragt','Beauftragt'],['verloren','Verloren'],['verworfen','Verwerfen']];
-var VSRC=[['Tuny','tunyCRM'],['SM','solarmaker'],['Empf','Empfehlung'],['Web','Website']];
+var VSRC=[['Tuny','tunyCRM'],['SM','solarmaker'],['Empf','Empfehlung'],['Web','Website'],['Meta','Meta-Werbung']];
 var VSP=[['pv','Photovoltaik'],['verteiler','Verteiler'],['elektro','Hauselektrik'],['stoerung','Störung'],['sonstiges','Sonstiges']];
 var SPC={verteiler:'#0B5E8E',elektro:'#B98600',stoerung:'#B98600',sonstiges:'#59636F'};
 var SPT={verteiler:'V',elektro:'E',stoerung:'!',sonstiges:'?'};
@@ -1691,7 +1691,7 @@ function renderLead(keep){
   '<tr><td>Sparte</td><td><select id="lsp" data-change="leadSparte" aria-label="Sparte">'+VSP.map(function(x){return '<option value="'+x[0]+'"'+(l.sp===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select></td></tr>'+
   '<tr><td>Quelle</td><td><select id="lsrc" data-change="leadSrc" aria-label="Quelle">'+srcOpts+'</select></td></tr>'+
   vrow('CRM-Stand',esc(l.last))+vrow('Eingetragen',esc(l.eingang))+vrow('Anrede',esc(l.anrede))+vrow('Personen',esc(l.personen))+vrow('Stromspeicher',esc(l.speicher))+vrow('Objekt',esc(l.objekt))+vrow('Ausrichtung',esc(l.ausrichtung))+
-  vrow('Dach',esc(l.dach))+vrow('Verbrauch',esc(l.verbrauch))+vrow(l.src==='Web'?'Anliegen':'Wünsche',esc(l.wuensche))+vrow('Budget',esc(l.budget))+vrow('Zeitrahmen',esc(l.umsetzung))+vrow(l.src==='Web'?'Nachricht':'Info',esc(l.info))+'</table></div>'+
+  vrow('Dach',esc(l.dach))+vrow('Verbrauch',esc(l.verbrauch))+vrow(l.src==='Web'||l.src==='Meta'?'Anliegen':'Wünsche',esc(l.wuensche))+vrow('Budget',esc(l.budget))+vrow('Zeitrahmen',esc(l.umsetzung))+vrow(l.src==='Web'?'Nachricht':'Info',esc(l.info))+'</table></div>'+
   '<div class="sect"><div class="sec"><span>Verlauf</span><span class="num">'+(l.log.length+l.hist.length)+'</span></div><ul class="lhist" id="lhist">'+histHtml(l)+'</ul></div>'+
   (isOffice()?'<button class="btn danger wide" data-act="leadDelete">'+(ui.confirm==='ld'+l.id?'Wirklich löschen? Nochmal tippen':'Lead löschen')+'</button>':'')+
   '</div>';
