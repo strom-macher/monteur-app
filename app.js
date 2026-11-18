@@ -49,14 +49,14 @@ var TABLES=['profiles','projects','tasks','hours','photos','materials','material
 var COLS={
   profiles:['id','name','role','active'],
   projects:['id','kundennr','name','short','addr','phone','phone2','email','note','termin','status','created_at'],
-  tasks:['id','name','project_id','assignee','due','due_time','done','done_at','created_by','created_at'],
+  tasks:['id','name','project_id','lead_id','assignee','due','due_time','done','done_at','created_by','created_at'],
   photos:['id','project_id','path','taken_at','created_by'],
   hours:['id','project_id','work_date','h','note','created_by','created_at'],
   materials:['id','name','unit','min_stock','note'],
   material_costs:['material_id','price','supplier','artnr'],
   stock_moves:['id','material_id','project_id','qty','kind','loc','note','created_by','created_at'],
   delivery_suppliers:['move_id','supplier'],
-  leads:['id','name','short','anrede','phone','phone2','email','addr','ort','objekt','ausrichtung','dach','verbrauch','speicher','wuensche','budget','umsetzung','personen','eingang','info','last_info','kwp_basis','kwp_est','kwp','source','lat','lon','km','min','status','status_at','termin','invite_at','invite_termin','notiz','notiz_at','src_hist','sparte','created_at','created_by'],
+  leads:['id','name','short','anrede','phone','phone2','email','addr','ort','objekt','ausrichtung','dach','verbrauch','speicher','wuensche','budget','umsetzung','personen','eingang','info','last_info','kwp_basis','kwp_est','kwp','source','lat','lon','km','min','status','status_at','termin','invite_at','invite_termin','notiz','notiz_at','src_hist','sparte','bearbeiter','created_at','created_by'],
   lead_log:['id','lead_id','text','at','created_by','by_name']
 };
 var LOCS=[{k:'haupt',n:'Hauptlager'},{k:'buero',n:'Büro'},{k:'gross',n:'Großwagen'},{k:'klein',n:'Kleinwagen'}];
@@ -117,7 +117,7 @@ function build(){
       mat:(bk[p.id]||[]).sort(function(a,b){return b.at-a.at})};
   });
   S.tasks=C.tasks.map(function(t){
-    return {id:t.id,name:t.name,project:t.project_id||null,assignee:t.assignee||null,due:t.due||null,time:t.due_time||'',
+    return {id:t.id,name:t.name,project:t.project_id||null,lead:t.lead_id||null,assignee:t.assignee||null,due:t.due||null,time:t.due_time||'',
       created:msOf(t.created_at),done:!!t.done,doneAt:msOf(t.done_at),by:t.created_by};
   });
   buildLeads();
@@ -325,6 +325,7 @@ function taskRow(t,o){
   var pn=t.project?proj(t.project):null,late=!t.done&&t.due&&t.due<TODAY();
   var sub=[];
   if(pn)sub.push('<span>'+esc(pn.label)+'</span>');
+  else if(t.lead){var tl=lead(t.lead);if(tl)sub.push('<span>Vertrieb · '+esc(tl.short)+'</span>')}
   if(t.due)sub.push('<span class="'+(late?'late':'')+'">'+esc(fmtDate(t.due,t.time))+'</span>');
   var mine=!o.restore&&!t.done&&t.assignee===ME.id;
   if(o.who&&t.assignee)sub.push(mine?'<span class="me">für dich</span>':'<span>'+esc(first(person(t.assignee).name))+'</span>');
@@ -521,6 +522,7 @@ function sheetTaskNew(pid,t){
     '<div class="fld"><label for="td">Termin</label><div class="chips" style="margin-bottom:2px"><button type="button" class="chip" data-act="setDate" data-v="0">Heute</button><button type="button" class="chip" data-act="setDate" data-v="1">Morgen</button><button type="button" class="chip" data-act="setDate" data-v="7">In 7 Tagen</button><button type="button" class="chip" data-act="setDate" data-v="">Ohne</button></div>'+
     '<div class="grid2"><input id="td" type="date" aria-label="Datum" value="'+(t&&t.due?esc(t.due):'')+'"><input id="tt" type="time" aria-label="Uhrzeit" value="'+(t&&t.time?esc(String(t.time).slice(0,5)):'')+'"></div></div>'+
     '<button class="btn main wide" type="submit">'+(t?'Änderungen speichern':'Aufgabe anlegen')+'</button>'+
+    (t&&t.lead&&lead(t.lead)?'<button class="btn wide" type="button" data-act="taskLead" data-id="'+esc(t.lead)+'">Lead öffnen: '+esc(lead(t.lead).name)+'</button>':'')+
     (t?'<p class="hint">Angelegt '+esc(fmtTs(t.created))+(t.by?' von '+esc(first(person(t.by).name)):'')+'</p>':'')+
     (canDel?'<button class="btn danger wide" type="button" data-act="delTask" data-id="'+t.id+'">'+(ui.confirm==='dt'+t.id?'Wirklich löschen? Nochmal tippen':'Aufgabe löschen')+'</button>':'')+
     '</form>';
@@ -1065,12 +1067,13 @@ function calItems(day){
     if(!l.termin||VDATED.indexOf(l.st)<0)return;var d=String(l.termin).slice(0,10);if(d!==day)return;
     out.push({k:l.st==='wiedervorlage'?'w':'l',t:String(l.termin).slice(11,16),title:(l.st==='wiedervorlage'?'Wiedervorlage: ':'Besichtigung: ')+l.name,sub:l.addr||l.ort||'',id:l.id});
   });
-  S.tasks.forEach(function(t){if(t.done||t.due!==day)return;var p=t.project?proj(t.project):null;
-    out.push({k:'t',t:t.time?String(t.time).slice(0,5):'',title:t.name,sub:[p?p.name:'',t.assignee?first(person(t.assignee).name):''].filter(Boolean).join(' · '),id:p?p.id:'',mine:t.assignee===ME.id,late:day<TODAY()})});
+  S.tasks.forEach(function(t){if(t.done||t.due!==day)return;var p=t.project?proj(t.project):null,tl=t.lead?lead(t.lead):null;
+    if(tl&&tl.termin&&VDATED.indexOf(tl.st)>=0&&String(tl.termin).slice(0,10)===day)return;
+    out.push({k:'t',t:t.time?String(t.time).slice(0,5):'',title:t.name,sub:[p?p.name:tl?'Vertrieb':'',t.assignee?first(person(t.assignee).name):''].filter(Boolean).join(' · '),id:p?p.id:'',lid:tl?tl.id:'',mine:t.assignee===ME.id,late:day<TODAY()})});
   return out.sort(function(a,b){return (a.t||'99')<(b.t||'99')?-1:(a.t||'99')>(b.t||'99')?1:0});
 }
 function calRow(x){
-  var act=x.k==='p'||(x.k==='t'&&x.id)?'calProj':(x.k==='l'||x.k==='w')?'calLead':'';
+  var act=x.k==='p'||(x.k==='t'&&x.id)?'calProj':(x.k==='l'||x.k==='w')?'calLead':(x.k==='t'&&x.lid)?'calLead':'';if(x.k==='t'&&!x.id&&x.lid)x.id=x.lid;
   var tag=x.k==='t'?(x.mine?'<span class="cmine">für dich</span>':''):'';
   return '<button class="citem k-'+x.k+(x.late?' late':'')+(x.mine?' mine':'')+'"'+(act?' data-act="'+act+'" data-id="'+esc(x.id)+'"':' disabled')+'><span class="cbar"></span><span class="ctime num">'+esc(x.t||'')+'</span><span class="grow"><span class="t">'+esc(x.title)+'</span>'+(x.sub?'<span class="s">'+esc(x.sub)+'</span>':'')+'</span>'+tag+'</button>';
 }
@@ -1139,13 +1142,28 @@ async function renderPushBox(){
     off:'Werktags um 8:00 eine kurze Nachricht mit deinen Aufgaben, den offenen Aufgaben im Team und den Terminen des Tages.'}[st];
   b.innerHTML='<p class="hint" style="font-size:14px;color:var(--ink)">'+txt+'</p>'+
     (st==='off'?'<button class="btn main wide" data-act="pushOn" style="margin-top:8px">Benachrichtigungen aktivieren</button>':'')+
-    (st==='on'?'<div class="row2" style="margin-top:8px"><button class="btn" data-act="pushTest">Test senden</button><button class="btn" data-act="pushOff">Ausschalten</button></div>':'');
+    (st==='on'?'<div class="row2" style="margin-top:8px"><button class="btn" data-act="pushTest">Test senden</button><button class="btn" data-act="pushOff">Ausschalten</button></div>':'')+
+    (st==='on'?'<div class="sec" style="margin:16px 0 6px">Termin-Erinnerung</div><div id="terminBox"><p class="hint">Wird geprüft …</p></div>':'');
+  if(st==='on')renderTerminBox();
+}
+/* Termin-Erinnerung: 1 Stunde vor jedem eigenen Termin (Besichtigung/Wiedervorlage als Bearbeiter, Aufgaben mit Uhrzeit) */
+async function terminPref(){try{var r=await sb.from('user_prefs').select('termin_push').eq('user_id',ME.id).maybeSingle();return !!(r.data&&r.data.termin_push)}catch(e){return null}}
+async function renderTerminBox(){
+  var b=$('#terminBox');if(!b)return;var on=await terminPref();
+  if(on===null){b.innerHTML='<p class="hint">Gerade nicht abrufbar – bitte mit Empfang nochmal öffnen.</p>';return}
+  b.innerHTML='<p class="hint" style="font-size:14px;color:var(--ink)">'+(on?'Aktiv: Eine Stunde vor jedem deiner Termine kommt eine Erinnerung – Besichtigungen und Wiedervorlagen, bei denen du Bearbeiter bist, und Aufgaben mit Uhrzeit.':'Eine Stunde vor jedem deiner Termine eine kurze Erinnerung aufs Handy: Besichtigungen und Wiedervorlagen, bei denen du Bearbeiter bist, und Aufgaben mit Uhrzeit.')+'</p>'+
+    '<button class="btn '+(on?'':'main ')+'wide" data-act="terminPush" data-v="'+(on?'0':'1')+'" style="margin-top:8px">'+(on?'Termin-Erinnerung ausschalten':'Termin-Erinnerung einschalten')+'</button>';
+}
+async function setTerminPref(on){
+  try{var r=await sb.from('user_prefs').upsert({user_id:ME.id,termin_push:on,updated_at:new Date().toISOString()},{onConflict:'user_id'});if(r.error)throw r.error;
+    toast(on?'Termin-Erinnerung eingeschaltet':'Termin-Erinnerung ausgeschaltet')}catch(e){toast('Hat nicht geklappt – bitte mit Empfang nochmal versuchen.')}
+  renderTerminBox();
 }
 function pushHint(){
   try{if(!PUSH_OK||(isIOS&&!standalone)||Notification.permission!=='default'||localStorage.getItem('sm-push-hint'))return ''}catch(e){return ''}
   return '<div class="phint rise" style="--i:4"><span>'+ico.bolt+'</span><div class="grow"><b>Tägliche Übersicht aufs Handy</b><small>Werktags um 8:00: deine Aufgaben und die Termine des Tages.</small></div><button class="btn small main" data-act="pushOn">Aktivieren</button><button class="x" data-act="pushLater" aria-label="Später">'+ico.x+'</button></div>';
 }
-if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',function(e){if(e.data&&e.data.go==='aufgaben'&&ME){setTab('aufgaben')}});
+if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',function(e){if(!e.data||!ME)return;var m=String(e.data.url||'').match(/lead=([^&]+)/);if(m&&lead(decodeURIComponent(m[1]))){closeSheet();setTab('vertrieb');openLead(decodeURIComponent(m[1]));return}if(e.data.go==='aufgaben')setTab('aufgaben')});
 
 /* ---------- Aktionen ---------- */
 function setTab(t){
@@ -1176,6 +1194,7 @@ var actions={
   pushOn:async function(el){el.disabled=true;await pushEnable();try{localStorage.setItem('sm-push-hint','1')}catch(e){}renderPushBox();if(ui.tab==='start')renderTab(false)},
   pushOff:async function(){await pushDisable();renderPushBox()},
   pushTest:function(){pushTest()},
+  terminPush:function(el){el.disabled=true;setTerminPref(el.dataset.v==='1')},
   pushLater:function(){try{localStorage.setItem('sm-push-hint','1')}catch(e){}var h=$('.phint');if(h)h.remove()},
   cal:function(){ui.calW=0;ui.calSel=null;sheetCal()},
   calW:function(el){ui.calW=(ui.calW||0)+Number(el.dataset.v);ui.calSel=null;calKeep()},
@@ -1453,7 +1472,7 @@ function buildLeads(){
       wuensche:r.wuensche||'',budget:r.budget||'',umsetzung:r.umsetzung||'',personen:r.personen||'',eingang:r.eingang||'',info:r.info||'',last:r.last_info||'',
       kb:r.kwp_basis||'',kEst:kEst,kOv:kOv,k:k,src:r.source||'Tuny',lat:n(r.lat),lon:n(r.lon),km:n(r.km),min:n(r.min),
       st:r.status||'offen',stAt:msOf(r.status_at),termin:r.termin||'',inviteAt:msOf(r.invite_at),inviteT:r.invite_termin||'',
-      sp:r.sparte||'pv',notiz:r.notiz||'',notizAt:msOf(r.notiz_at),hist:Array.isArray(r.src_hist)?r.src_hist:[],created:msOf(r.created_at),
+      sp:r.sparte||'pv',bear:r.bearbeiter||null,notiz:r.notiz||'',notizAt:msOf(r.notiz_at),hist:Array.isArray(r.src_hist)?r.src_hist:[],created:msOf(r.created_at),
       log:(logs[r.id]||[]).sort(function(a,b){return b.at-a.at})};
   });
 }
@@ -1506,7 +1525,7 @@ function leadCard(l,max){
   var note=l.notiz?'<span class="lc-n">✎ '+esc(l.notiz.split('\n')[0].slice(0,60))+(l.notiz.length>60?'…':'')+'</span>':'';
   var term=dated?'<span class="lc-t">'+(s==='wiedervorlage'?'Wiedervorlage':'Termin')+': '+(l.termin?esc(fmtTermin(l.termin)):'noch offen')+'</span>':'';
   return '<button class="lcard s-'+s+'" data-act="openLead" data-id="'+esc(l.id)+'"><span class="lsw" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(flagTxt(l))+'</b>'+XSVG+'</span>'+
-    '<span class="grow"><span class="t">'+esc(l.short)+' <i class="src">'+esc(isPv(l)?l.src:spLabel(l.sp))+'</i></span><span class="s">'+esc(l.ort||city(l.addr))+' · '+esc(fmtKm(l))+'</span>'+term+note+'</span></button>';
+    '<span class="grow"><span class="t">'+esc(l.short)+' <i class="src">'+esc(isPv(l)?l.src:spLabel(l.sp))+'</i></span><span class="s">'+esc(l.ort||city(l.addr))+' · '+esc(fmtKm(l))+(l.bear?' · '+(l.bear===ME.id?'<b class="lme">du</b>':esc(first(person(l.bear).name))):'')+'</span>'+term+note+'</span></button>';
 }
 function vSpOk(l){return !vui.sp||(vui.sp==='elektro'?(l.sp==='elektro'||l.sp==='stoerung'):l.sp===vui.sp)}
 function tabVertrieb(){
@@ -1672,6 +1691,7 @@ function renderLead(keep){
   '<div class="dbody">'+
   '<div class="lhead"><span class="lsw big s-'+s+'" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(flagTxt(l))+'</b><small>'+(isPv(l)?'kWp':esc(spLabel(l.sp)))+'</small>'+XSVG+'</span>'+
   '<div class="grow"><div class="lst"><span class="vpill s-'+s+'">'+VST[s]+'</span><span class="tag">'+esc(srcLabel(l.src))+'</span></div><div class="hint">'+(l.stAt?'Status gesetzt am '+esc(fmtStamp(l.stAt)):'Noch kein Status gesetzt')+'</div></div></div>'+
+  '<div class="lbear"><label for="lbear">Bearbeiter</label><select id="lbear" data-change="leadBear">'+bearOpts(l.bear)+'</select></div>'+
   '<div class="qrow">'+(telh?'<a class="qb" href="tel:'+esc(telh)+'">'+ico.tel+'Anrufen</a>':'')+
     ((l.addr||l.ort)?'<a class="qb" href="https://www.google.com/maps/dir/?api=1&amp;destination='+q+'" target="_blank" rel="noopener">'+ico.nav+'Navigation</a>':'')+
     (l.email?'<a class="qb" href="mailto:'+esc(l.email)+'">'+ico.mail+'E-Mail</a>':'')+'</div>'+
@@ -1776,8 +1796,28 @@ function setLeadStatus(id,s){
   var l=lead(id);if(!l)return;
   var next=l.st===s?'offen':s,row={id:id,status:next,status_at:new Date().toISOString()};
   if(next!=='einplanen'||!VDATED.includes(l.st)){if(next!==l.st){row.termin=null;row.invite_at=null;row.invite_termin=null}}
+  if(!l.bear)row.bearbeiter=ME.id;
   mut('leads','up',row);logLead(id,'Status: '+VST[l.st]+' → '+VST[next]);
+  var nt=leadNextTask(lead(id),next);
+  if(nt)toast('Aufgabe für '+(nt.assignee===ME.id?'dich':first(person(nt.assignee).name))+': '+VNEXT[next][0]+(nt.due?' ('+fmtDate(nt.due,nt.due_time)+')':''));
   if(next==='einplanen'||next==='wiedervorlage')setTimeout(function(){var i=$('#ltermin');if(i&&!i.value)i.focus()},120);
+}
+/* Nächster Schritt: bei jedem Statuswechsel offene Lead-Aufgaben abhaken und eine neue für den Bearbeiter anlegen */
+var VNEXT={nicht_erreicht:['Erneut anrufen','w1'],einplanen:['Besichtigung','termin'],besichtigt:['Angebot erstellen','w2'],angeboten:['Angebot nachfassen','d7'],wiedervorlage:['Wiedervorlage anrufen','termin'],beauftragt:['Projekt anlegen & AB schicken','d0']};
+function dayPlus(n,work){var d=new Date();d.setHours(12,0,0,0);var c=0;while(c<n){d.setDate(d.getDate()+1);if(!work||(d.getDay()%6!==0))c++}return iso(d)}
+function leadNextTask(l,next){
+  if(!l)return null;var now=new Date().toISOString();
+  S.tasks.filter(function(t){return !t.done&&t.lead===l.id}).forEach(function(t){mut('tasks','up',{id:t.id,done:true,done_at:now})});
+  var n=VNEXT[next];if(!n)return null;
+  var due=null,tm=null;
+  if(n[1]==='termin'){if(l.termin){due=String(l.termin).slice(0,10);tm=String(l.termin).slice(11,16)||null}}
+  else due=n[1]==='w1'?dayPlus(1,true):n[1]==='w2'?dayPlus(2,true):n[1]==='d7'?dayPlus(7):TODAY();
+  var t={id:uuid(),name:n[0]+': '+String(l.name).replace(/\s*\(.*\)\s*/,'').trim(),project_id:null,lead_id:l.id,assignee:l.bear||ME.id,due:due,due_time:tm,done:false,done_at:null,created_by:ME.id,created_at:now};
+  mut('tasks','up',t);return t;
+}
+function bearOpts(sel){
+  var ppl=PEOPLE.slice();if(sel&&!ppl.some(function(p){return p.id===sel}))ppl.push(person(sel));
+  return (sel?'':'<option value="" selected>Noch niemand</option>')+ppl.map(function(p){return '<option value="'+p.id+'"'+(p.id===sel?' selected':'')+'>'+esc(p.name)+(p.id===ME.id?' (du)':'')+'</option>'}).join('');
 }
 function addMinutes(v,mins){var x=new Date(v);x.setMinutes(x.getMinutes()+mins);return iso(x)+'T'+pad(x.getHours())+':'+pad(x.getMinutes())}
 function outlookUrl(l){
@@ -1794,7 +1834,12 @@ function outlookUrl(l){
   return 'https://outlook.office.com/calendar/0/deeplink/compose?'+Object.keys(p).map(function(k){return k+'='+encodeURIComponent(p[k])}).join('&');
 }
 var vchange={
-  leadTermin:function(el){var l=lead(ui.lead);if(!l)return;var v=el.value||null;el.blur();if((v||'')===l.termin)return;mut('leads','up',{id:l.id,termin:v});logLead(l.id,(l.st==='wiedervorlage'?'Wiedervorlage':'Termin')+(v?' gesetzt: '+fmtTermin(v):' entfernt'))},
+  leadTermin:function(el){var l=lead(ui.lead);if(!l)return;var v=el.value||null;el.blur();if((v||'')===l.termin)return;mut('leads','up',{id:l.id,termin:v});logLead(l.id,(l.st==='wiedervorlage'?'Wiedervorlage':'Termin')+(v?' gesetzt: '+fmtTermin(v):' entfernt'));
+    S.tasks.filter(function(t){return !t.done&&t.lead===l.id}).forEach(function(t){mut('tasks','up',{id:t.id,due:v?String(v).slice(0,10):null,due_time:v?String(v).slice(11,16):null})})},
+  leadBear:function(el){var l=lead(ui.lead);if(!l)return;var v=el.value||null;if(v===l.bear)return;
+    mut('leads','up',{id:l.id,bearbeiter:v});logLead(l.id,'Bearbeiter: '+(v?person(v).name:'niemand'));
+    var open=S.tasks.filter(function(t){return !t.done&&t.lead===l.id});if(v)open.forEach(function(t){mut('tasks','up',{id:t.id,assignee:v})});
+    toast(v?'Bearbeiter: '+first(person(v).name)+(open.length?' – offene Aufgabe geht mit':''):'Kein Bearbeiter')},
   leadNote:function(el){var l=lead(ui.lead);if(!l)return;var t=String(el.value||'').replace(/\s+$/,'');if(t===l.notiz)return;var now=new Date().toISOString();
     mut('leads','up',{id:l.id,notiz:t||null,notiz_at:t?now:null});logLead(l.id,t?'Notiz: '+t.replace(/\s+/g,' ').slice(0,200)+(t.length>200?'…':''):'Notiz gelöscht');var x=$('#lnote-st');if(x)x.textContent='Gespeichert'},
   leadKwp:function(el){var l=lead(ui.lead);if(!l)return;var raw=String(el.value).trim(),n=parseFloat(raw.replace(',','.'));
@@ -1820,6 +1865,7 @@ function sheetLeadForm(l){
     (l?'':'<p class="hint">Tipp: Im Textfeld die Mikrofon-Taste der Handy-Tastatur antippen und diktieren.</p>')+
     LF.filter(function(x){return x[5]}).map(f).join('')+
     '<div class="fld"><label>Sparte</label><div class="chips" id="lf_sp">'+VSP.filter(function(x){return x[0]!=='sonstiges'}).map(function(x){return '<button type="button" class="chip'+(vui.lsp===x[0]?' on':'')+'" data-act="lfSp" data-v="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div></div>'+
+    (l?'':fld('lf_bear','Bearbeiter','<select id="lf_bear">'+bearOpts(ME.id)+'</select>'))+
     '<div class="fld"><label>Quelle</label><div class="chips" id="lf_src">'+VSRC.map(function(x){return '<button type="button" class="chip'+(src===x[0]?' on':'')+'" data-act="lfSrc" data-v="'+x[0]+'">'+x[1]+'</button>'}).join('')+'</div></div>'+
     '<div class="fld"><button type="button" class="btn wide" data-act="lfGeo">'+ico.pin+'Position aus Adresse bestimmen</button><div class="hint" id="lf_geo">'+(vui.geo?'Kartenposition vorhanden · ca. '+esc(fmtKm(vui.geo))+' ab Mödling':'Noch keine Kartenposition. Wird beim Speichern automatisch gesucht, wenn Empfang da ist.')+'</div></div>'+
     '<details class="more"'+(l?' open':'')+'><summary>Weitere Angaben</summary><div class="form" style="margin-top:12px">'+LF.filter(function(x){return !x[5]}).map(f).join('')+'</div></details>'+
@@ -1874,7 +1920,7 @@ async function submitLead(){
   }
   var slug=String(row.name).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,30)||'lead';
   row.id='n-'+slug+'-'+Date.now().toString(36);row.status='offen';row.eingang=new Date().toLocaleDateString('de-AT');row.src_hist=[];
-  row.created_at=new Date().toISOString();row.created_by=ME.id;
+  row.created_at=new Date().toISOString();row.created_by=ME.id;row.bearbeiter=val('lf_bear')||ME.id;
   closeSheet();mut('leads','up',row);logLead(row.id,'Lead angelegt ('+srcLabel(row.source)+')');
   toast(row.lat==null&&(row.addr||row.ort)?'Lead angelegt – Position wird bestimmt, sobald Empfang da ist':'Lead angelegt');
   openLead(row.id);
@@ -1916,6 +1962,7 @@ async function vSnapshot(btn){
 
 Object.assign(actions,{
   openLead:function(el){openLead(el.dataset.id)},
+  taskLead:function(el){var id=el.dataset.id;closeSheet();setTab('vertrieb');openLead(id)},
   leadNew:function(){sheetLeadForm(null)},
   leadEdit:function(){var l=lead(ui.lead);if(l)sheetLeadForm(l)},
   leadStatus:function(el){setLeadStatus(ui.lead,el.dataset.v)},
