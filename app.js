@@ -56,7 +56,7 @@ var COLS={
   material_costs:['material_id','price','supplier','artnr'],
   stock_moves:['id','material_id','project_id','qty','kind','loc','note','created_by','created_at'],
   delivery_suppliers:['move_id','supplier'],
-  leads:['id','name','short','anrede','phone','phone2','email','addr','ort','objekt','ausrichtung','dach','verbrauch','speicher','wuensche','budget','umsetzung','personen','eingang','info','last_info','kwp_basis','kwp_est','kwp','source','lat','lon','km','min','status','status_at','termin','invite_at','invite_termin','notiz','notiz_at','src_hist','sparte','bearbeiter','created_at','created_by'],
+  leads:['id','name','short','anrede','phone','phone2','email','addr','ort','objekt','ausrichtung','dach','verbrauch','speicher','wuensche','budget','umsetzung','personen','eingang','info','last_info','kwp_basis','kwp_est','kwp','source','lat','lon','km','min','status','status_at','termin','invite_at','invite_termin','notiz','notiz_at','src_hist','sparte','bearbeiter','kdnr','created_at','created_by'],
   lead_log:['id','lead_id','text','at','created_by','by_name']
 };
 var LOCS=[{k:'haupt',n:'Hauptlager'},{k:'buero',n:'Büro'},{k:'gross',n:'Großwagen'},{k:'klein',n:'Kleinwagen'}];
@@ -1455,7 +1455,28 @@ var SPC={verteiler:'#0B5E8E',elektro:'#B98600',stoerung:'#B98600',sonstiges:'#59
 var SPT={verteiler:'V',elektro:'E',stoerung:'!',sonstiges:'?'};
 function spLabel(k){for(var i=0;i<VSP.length;i++)if(VSP[i][0]===k)return VSP[i][1];return 'Photovoltaik'}
 function isPv(l){return !l.sp||l.sp==='pv'}
-function flagTxt(l){return isPv(l)?fmtK(l.k):SPT[l.sp]||'?'}
+function flagTxt(l){if(!isPv(l))return SPT[l.sp]||'?';var b=batOf(l);return b?'🔋'+(b.kwh||''):fmtK(l.k)}
+/* Reine Speicher-/Batterieerweiterung erkennen (aus der PV-Lead-Karte) */
+var BATRE=/(batterie|speicher|akku)[\s-]*(erweiter|nachr[üu]st|zus[äa]tzlich|aufr[üu]st|tausch)|(erweiter|nachr[üu]st|aufr[üu]st)\w*\s+(des|der|vom|um)?\s*(batterie|speicher|akku)|nur\s+(ein(en)?\s+)?(batterie|speicher|akku)/i;
+function batOf(l){
+  if(!isPv(l))return null;var tx=[l.wuensche,l.objekt,l.info,l.speicher,l.verbrauch,l.budget,l.dach,l.notiz].filter(Boolean).join(' · ');if(!BATRE.test(tx))return null;
+  var kwh=null;[l.speicher,l.wuensche,l.info,l.notiz,l.objekt].some(function(f){var m=String(f||'').match(/(\d+(?:[.,]\d+)?)\s*kwh(?!\s*(\/|pro|je|im)\s*(a\b|jahr|j\b))/i);if(m){kwh=m[1].replace('.',',');return true}return false});
+  return {kwh:kwh};
+}
+/* Alterung: Leads ohne Bewegung färben sich orange bis rot (aus der PV-Lead-Karte) */
+function stSince(l,s){var lb=String(VST[s]||'').split('/')[0],t=0;if(!lb)return 0;
+  l.log.slice().sort(function(a,b){return a.at-b.at}).forEach(function(e){var m=/^Status:.*→\s*(.+)$/.exec(e.text);if(!m)return;if(m[1].indexOf(lb)===0){if(!t)t=e.at}else t=0});return t}
+function ageOf(l){
+  var day=864e5,now=Date.now(),s=l.st,n,a,t;
+  if((s==='wiedervorlage'||s==='einplanen')&&l.termin){a=(now-new Date(l.termin).getTime())/day;if(a<0)return null;t=Math.min(1,a/14);n=Math.floor(a);
+    return {t:t,label:n<1?(s==='einplanen'?'Termin heute':'heute fällig'):(s==='einplanen'?'Termin ':'')+n+(n===1?' Tag':' Tage')+' überfällig'}}
+  if(s==='besichtigt'){var b0=stSince(l,'besichtigt')||l.stAt;if(!b0)return null;a=(now-b0)/day;if(a<7)return null;n=Math.floor(a);return {t:Math.min(1,(a-7)/7),label:'besichtigt vor '+n+' Tagen'}}
+  if(s==='offen'||s==='nicht_erreicht'||s==='einplanen'){var m=/(\d{1,2})\.(\d{1,2})\.(\d{4})/.exec(l.eingang||''),cr=m?new Date(+m[3],m[2]-1,+m[1]).getTime():(l.created||0),nt=l.notizAt||0,b=Math.max(cr,nt);if(!b)return null;
+    a=(now-b)/day;if(a<7)return null;n=Math.floor(a);return {t:Math.min(1,(a-7)/7),label:(nt>=cr?'letzte Notiz vor ':'angelegt vor ')+n+' Tagen'}}
+  if(s==='angeboten'){var b1=stSince(l,'angeboten')||l.stAt;if(!b1)return null;a=(now-b1)/day;if(a<7)return null;n=Math.floor(a);return {t:Math.min(1,(a-7)/7),label:'seit '+n+' Tagen angeboten'}}
+  return null;
+}
+function ageCol(t,li){return 'hsl('+Math.round(32-32*t)+' 92% '+(li==null?50:li)+'%)'}
 var HQ={lat:48.087,lon:16.302,label:'Grenzgasse 40, 2340 Mödling'};
 var V_ARCH=28*864e5;
 var vui={sp:'',prism:true,arch:false,zoom:null,sig:'',edit:null,geo:null,busy:false};
@@ -1472,7 +1493,7 @@ function buildLeads(){
       wuensche:r.wuensche||'',budget:r.budget||'',umsetzung:r.umsetzung||'',personen:r.personen||'',eingang:r.eingang||'',info:r.info||'',last:r.last_info||'',
       kb:r.kwp_basis||'',kEst:kEst,kOv:kOv,k:k,src:r.source||'Tuny',lat:n(r.lat),lon:n(r.lon),km:n(r.km),min:n(r.min),
       st:r.status||'offen',stAt:msOf(r.status_at),termin:r.termin||'',inviteAt:msOf(r.invite_at),inviteT:r.invite_termin||'',
-      sp:r.sparte||'pv',bear:r.bearbeiter||null,notiz:r.notiz||'',notizAt:msOf(r.notiz_at),hist:Array.isArray(r.src_hist)?r.src_hist:[],created:msOf(r.created_at),
+      sp:r.sparte||'pv',bear:r.bearbeiter||null,kdnr:r.kdnr||'',notiz:r.notiz||'',notizAt:msOf(r.notiz_at),hist:Array.isArray(r.src_hist)?r.src_hist:[],created:msOf(r.created_at),
       log:(logs[r.id]||[]).sort(function(a,b){return b.at-a.at})};
   });
 }
@@ -1524,8 +1545,10 @@ function leadCard(l,max){
   var s=l.st,dated=VDATED.includes(s);
   var note=l.notiz?'<span class="lc-n">✎ '+esc(l.notiz.split('\n')[0].slice(0,60))+(l.notiz.length>60?'…':'')+'</span>':'';
   var term=dated?'<span class="lc-t">'+(s==='wiedervorlage'?'Wiedervorlage':'Termin')+': '+(l.termin?esc(fmtTermin(l.termin)):'noch offen')+'</span>':'';
-  return '<button class="lcard s-'+s+'" data-act="openLead" data-id="'+esc(l.id)+'"><span class="lsw" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(flagTxt(l))+'</b>'+XSVG+'</span>'+
-    '<span class="grow"><span class="t">'+esc(l.short)+' <i class="src">'+esc(isPv(l)?l.src:spLabel(l.sp))+'</i></span><span class="s">'+esc(l.ort||city(l.addr))+' · '+esc(fmtKm(l))+(l.bear?' · '+(l.bear===ME.id?'<b class="lme">du</b>':esc(first(person(l.bear).name))):'')+'</span>'+term+note+'</span></button>';
+  var ag=ageOf(l),agSt=ag?' style="border-color:'+ageCol(ag.t)+';background:color-mix(in srgb,'+ageCol(ag.t)+' '+Math.round(12+14*ag.t)+'%,var(--paper))" title="'+esc(ag.label)+'"':'';
+  var agl=ag?'<span class="lc-a" style="color:'+ageCol(ag.t,38)+'">⏱ '+esc(ag.label)+'</span>':'';
+  return '<button class="lcard s-'+s+(ag?' aged':'')+'" data-act="openLead" data-id="'+esc(l.id)+'"'+agSt+'><span class="lsw" style="background:'+leadColor(l,max)+'"><b class="num">'+esc(flagTxt(l))+'</b>'+XSVG+'</span>'+
+    '<span class="grow"><span class="t">'+esc(l.short)+' <i class="src">'+esc(isPv(l)?l.src:spLabel(l.sp))+'</i></span><span class="s">'+esc(l.ort||city(l.addr))+' · '+esc(fmtKm(l))+(l.bear?' · '+(l.bear===ME.id?'<b class="lme">du</b>':esc(first(person(l.bear).name))):'')+'</span>'+term+agl+note+'</span></button>';
 }
 function vSpOk(l){return !vui.sp||(vui.sp==='elektro'?(l.sp==='elektro'||l.sp==='stoerung'):l.sp===vui.sp)}
 function tabVertrieb(){
@@ -1671,7 +1694,7 @@ function renderLead(keep){
   var old=$('.dbody',d),st=keep&&old?old.scrollTop:0,s=l.st,max=vMax();
   var telh=String(l.phone||'').replace(/[^\d+]/g,''),tel2=String(l.phone2||'').replace(/[^\d+]/g,'');
   var q=encodeURIComponent(String(l.addr||l.ort).replace(/\s*\(.*?\)\s*/g,' ').trim()+', Österreich');
-  var links=[['Google Karte','https://www.google.com/maps/search/?api=1&query='+q],['Satellit','https://maps.google.com/maps?q='+q+'&t=k'],['Apple Karten','https://maps.apple.com/?q='+q+'&t=k']];
+  var links=[['Google Karte','https://www.google.com/maps/search/?api=1&query='+q],['Satellit','https://maps.google.com/maps?q='+q+'&t=k'],['Bing Luftbild','https://www.bing.com/maps?q='+q+'&style=h'],['Apple Karten','https://maps.apple.com/?q='+q+'&t=k'],['OpenStreetMap','https://www.openstreetmap.org/search?query='+q]];
   var acts=VBTN.map(function(b){return '<button class="vst s-'+b[0]+'" data-act="leadStatus" data-v="'+b[0]+'" aria-pressed="'+(s===b[0])+'">'+(b[0]==='verworfen'?'<i class="ix">✕</i>':b[0]==='beauftragt'?'<i class="ok">✓</i>':'<i class="dot"></i>')+b[1]+'</button>'}).join('');
   var term='';
   if(VDATED.includes(s)){
@@ -1686,6 +1709,7 @@ function renderLead(keep){
   var mbase=vui.prism+'|'+(C.leads||[]).length;
   if(!keepMap&&om&&om._go&&om.dataset.lid!==l.id&&om.dataset.base===mbase&&om._go(l.id)){keepMap=om;om.dataset.sig=mapSig;om.dataset.lid=l.id}
   if(keepMap)keepMap.parentNode.removeChild(keepMap);
+  var oa=$('#lang',d),keepAng=oa&&oa.dataset.lid===l.id?oa:null;if(keepAng)keepAng.parentNode.removeChild(keepAng);
   d.hidden=false;d.classList.add('ldet');
   d.innerHTML='<div class="dmap" id="vmapd-slot"></div><div class="dhead"><button class="x" data-act="closeDetail" aria-label="Zurück zur Übersicht">'+ico.back+'</button><h1>'+esc(l.name)+'</h1></div>'+
   '<div class="dbody">'+
@@ -1697,7 +1721,8 @@ function renderLead(keep){
     (l.email?'<a class="qb" href="mailto:'+esc(l.email)+'">'+ico.mail+'E-Mail</a>':'')+'</div>'+
   ((s==='eingang'||s==='spam')?'<div class="sect vassign"><div class="sec"><span>'+(s==='spam'?'Vom Filter als Spam erkannt':'Zuordnen')+'</span></div><div class="vin-a">'+[['pv','Photovoltaik'],['verteiler','Verteiler'],['elektro','Hauselektrik']].map(function(x){return '<button class="chip" data-act="leadAssign" data-v="'+x[0]+'">'+x[1]+'</button>'}).join('')+(s==='eingang'?'<button class="chip ghost" data-act="leadAssign" data-v="spam">Spam</button>':'')+'</div></div>':
   '<div class="sect"><div class="sec"><span>Status</span></div><div class="vacts">'+acts+'</div><p class="hint">Nochmal tippen setzt zurück auf „Rückruf offen“.</p>'+term+
-  (s==='beauftragt'&&isOffice()?(l.log.some(function(e){return e.text==='Als Projekt angelegt'})?'<p class="hint" style="margin-top:10px">✓ Als Projekt angelegt – zu finden im Betrieb unter Projekte.</p>':'<button class="btn main wide" data-act="leadToProj" style="margin-top:10px">'+(ui.confirm==='lp'+l.id?'Trotzdem als Projekt anlegen':'Als Projekt anlegen')+'</button>'):'')+'</div>')+
+  (s==='beauftragt'&&isOffice()?(l.log.some(function(e){return e.text==='Als Projekt angelegt'})?'<p class="hint" style="margin-top:10px">✓ Als Projekt angelegt – zu finden im Betrieb unter Projekte.</p>':'<button class="btn main wide" data-act="leadToProj" style="margin-top:10px">'+(ui.confirm==='lp'+l.id?'Trotzdem als Projekt anlegen':'Als Projekt anlegen')+'</button>'):'')+'</div>'+
+  '<div class="sect" id="lang-slot"></div>')+
   '<div class="contact">'+
   '<div class="crow"><span style="color:var(--ink2)">'+ico.tel+'</span><div class="grow"><span class="k">Telefon</span><span class="v num">'+esc(l.phone||'nicht erfasst')+'</span></div>'+(telh?'<a href="tel:'+esc(telh)+'">Anrufen</a>':'')+'</div>'+
   (l.phone2?'<div class="crow"><span style="width:22px;flex:none"></span><div class="grow"><span class="k">Weitere Nummer</span><span class="v num">'+esc(l.phone2)+'</span></div>'+(tel2?'<a href="tel:'+esc(tel2)+'">Anrufen</a>':'')+'</div>':'')+
@@ -1710,6 +1735,7 @@ function renderLead(keep){
   '<tr><td>kWp</td><td><input id="lkwp" type="text" inputmode="decimal" data-change="leadKwp" value="'+(l.k!=null?esc(fmtK(l.k)):'')+'" placeholder="kWp" aria-label="Anlagengröße in kWp"><div class="hint">'+kNote+'</div></td></tr>'+
   '<tr><td>Sparte</td><td><select id="lsp" data-change="leadSparte" aria-label="Sparte">'+VSP.map(function(x){return '<option value="'+x[0]+'"'+(l.sp===x[0]?' selected':'')+'>'+x[1]+'</option>'}).join('')+'</select></td></tr>'+
   '<tr><td>Quelle</td><td><select id="lsrc" data-change="leadSrc" aria-label="Quelle">'+srcOpts+'</select></td></tr>'+
+  '<tr><td>Kunden-Nr.</td><td><input id="lkd" type="text" data-change="leadKd" value="'+esc(l.kdnr)+'" placeholder="für Angebot und Auftrag" aria-label="Kunden-Nummer"></td></tr>'+
   vrow('CRM-Stand',esc(l.last))+vrow('Eingetragen',esc(l.eingang))+vrow('Anrede',esc(l.anrede))+vrow('Personen',esc(l.personen))+vrow('Stromspeicher',esc(l.speicher))+vrow('Objekt',esc(l.objekt))+vrow('Ausrichtung',esc(l.ausrichtung))+
   vrow('Dach',esc(l.dach))+vrow('Verbrauch',esc(l.verbrauch))+vrow(l.src==='Web'||l.src==='Meta'?'Anliegen':'Wünsche',esc(l.wuensche))+vrow('Budget',esc(l.budget))+vrow('Zeitrahmen',esc(l.umsetzung))+vrow(l.src==='Web'?'Nachricht':'Info',esc(l.info))+'</table></div>'+
   '<div class="sect"><div class="sec"><span>Verlauf</span><span class="num">'+(l.log.length+l.hist.length)+'</span></div><ul class="lhist" id="lhist">'+histHtml(l)+'</ul></div>'+
@@ -1721,6 +1747,24 @@ function renderLead(keep){
   else{slot.id='vmapd';slot.dataset.sig=mapSig;slot.dataset.lid=l.id;slot.dataset.base=mbase;slot.innerHTML='<p class="hint vml">Karte wird geladen…</p>';
     loadMapLibs().then(function(){if(slot.isConnected)drawMap(slot,{sel:l.id})}).catch(function(){slot.innerHTML='<p class="hint vml">Karte offline nicht verfügbar.</p>'})}
   var ta=$('#lnote');if(ta)ta.addEventListener('input',function(){var x=$('#lnote-st');if(x)x.textContent='Ungespeicherte Änderung – wird beim Verlassen des Feldes gespeichert'});
+  var as=$('#lang-slot',d);
+  if(as){if(keepAng){as.parentNode.replaceChild(keepAng,as);if(window.SMA)SMA.soft()}else{as.id='lang';as.dataset.lid=l.id;angMount(as,l)}}
+}
+/* Angebote & Aufträge: geschütztes Modul (Preise) aus dem privaten Speicher, erst nach dem Anmelden */
+var smaP=null;
+function loadSMA(){
+  if(smaP)return smaP;
+  smaP=sb.storage.from('intern').download('angebot.js').then(function(r){if(r.error)throw r.error;return r.data.text()}).then(function(t){
+    return new Promise(function(ok,no){var s=document.createElement('script');s.src=URL.createObjectURL(new Blob([t],{type:'text/javascript'}));s.onload=function(){ok()};s.onerror=function(){no(new Error('Modul'))};document.head.appendChild(s)});
+  }).catch(function(e){smaP=null;throw e});
+  return smaP;
+}
+function angMount(el,l){
+  var head='<div class="sec"><span>Angebot &amp; Auftrag</span></div>';
+  if(window.SMA){SMA.mount(l.id,el);return}
+  if(!navigator.onLine||!sb){el.innerHTML=head+'<p class="hint">Angebote gibt es nur mit Empfang.</p>';return}
+  el.innerHTML=head+'<p class="hint">Angebote werden geladen …</p>';
+  loadSMA().then(function(){if(el.isConnected&&window.SMA)SMA.mount(l.id,el)}).catch(function(){if(el.isConnected)el.innerHTML=head+'<p class="hint">Angebote konnten nicht geladen werden.</p>'});
 }
 function histHtml(l){
   var own=l.log.map(function(e){var who=e.by?first(person(e.by).name):(e.byName||'');return '<li><span class="hd">'+esc(fmtStamp(e.at))+(who?' · '+esc(who):'')+'</span>'+esc(e.text)+'</li>'}).join('');
@@ -1846,8 +1890,14 @@ var vchange={
     var nv=(!raw||!isFinite(n)||n<=0)?null:Math.round(n*10)/10;if(nv!=null&&l.kEst!=null&&nv===l.kEst)nv=null;if(nv===l.kOv)return;
     mut('leads','up',{id:l.id,kwp:nv});logLead(l.id,nv==null?'kWp zurück auf Vorschlag ('+fmtK(l.kEst)+')':'kWp geändert: '+fmtK(l.k)+' → '+fmtK(nv))},
   leadSparte:function(el){var l=lead(ui.lead);if(!l||el.value===l.sp)return;el.blur();mut('leads','up',{id:l.id,sparte:el.value});logLead(l.id,'Sparte: '+spLabel(l.sp)+' → '+spLabel(el.value))},
-  leadSrc:function(el){var l=lead(ui.lead);if(!l||el.value===l.src)return;el.blur();mut('leads','up',{id:l.id,source:el.value});logLead(l.id,'Quelle: '+srcLabel(l.src)+' → '+srcLabel(el.value))}
+  leadSrc:function(el){var l=lead(ui.lead);if(!l||el.value===l.src)return;el.blur();mut('leads','up',{id:l.id,source:el.value});logLead(l.id,'Quelle: '+srcLabel(l.src)+' → '+srcLabel(el.value))},
+  leadKd:function(el){var l=lead(ui.lead);if(!l)return;var v=String(el.value||'').trim();if(v===l.kdnr)return;mut('leads','up',{id:l.id,kdnr:v||null});logLead(l.id,'Kunden-Nr. '+(v||'entfernt'))}
 };
+function setKwpBridge(id,v){
+  var l=lead(id);if(!l)return;var n=parseFloat(String(v==null?'':v).replace(',','.'));var nv=isFinite(n)&&n>0?Math.round(n*10)/10:null;
+  if(nv===l.kOv||(nv!=null&&l.kOv==null&&nv===l.kEst))return;
+  mut('leads','up',{id:id,kwp:nv});logLead(id,nv==null?'kWp zurück auf Vorschlag ('+fmtK(l.kEst)+')':'kWp geändert: '+fmtK(l.k)+' → '+fmtK(nv));
+}
 
 /* Neuer Lead / Bearbeiten */
 var LF=[['lf_name','name','Name','text','Vor- und Nachname',1],['lf_anrede','anrede','Anrede','text','z. B. Frau Muster',1],['lf_phone','phone','Telefon','tel','',1],['lf_email','email','E-Mail','email','',1],
@@ -2201,4 +2251,7 @@ async function exportProjekt(pid){
   await xlSave(wb,'Aufmass_'+(p.kundennr?p.kundennr+'_':'')+(fileSafe(p.name)||'Projekt')+'_'+TODAY()+'.xlsx');
   toast('Aufmaß erstellt');
 }
+/* Schnittstelle für das geschützte Angebote-Modul */
+window.SMAPP={sb:function(){return sb},lead:function(id){return lead(id)},raw:function(id){return (C.leads||[]).filter(function(r){return r.id===id})[0]||null},
+  mut:mut,logLead:logLead,setLeadStatus:setLeadStatus,setKwp:setKwpBridge,toast:toast};
 })();
