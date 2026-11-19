@@ -612,3 +612,7 @@ button.tt .sub{display:flex}
   .hbtn{font-size:21px;padding:0 14px}
   .hbtn small{font-size:12px}
 }
+/* Alterung der Leads und Angebote-Bereich (aus der PV-Lead-Karte, 19.11.2026) */
+.lcard .lc-a{display:block;font-size:12.5px;font-weight:700}
+.lcard.aged{border-width:2px}
+#lang .hint{margin:0}
